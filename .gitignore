@@ -1,10 +1,4 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.pyc
-
-# Environment / Secrets — NEVER COMMIT THESE
+# ── Secrets — NEVER commit ──────────────────────────────────────────
 .env
 .env.local
 .env.production
@@ -13,45 +7,59 @@ __pycache__/
 backend/.env
 *.env.*
 
-# Virtual environments
-.venv
-env/
+# ── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
 venv/
+env/
 ENV/
 .python-version
 
-# Database files
+# ── Database files ────────────────────────────────────────────────────
 *.db
 *.db-shm
 *.db-wal
-raksha.db*
 backend/*.db
 
-# Logs
-*.log
-logs/
-
-# Node / Frontend build artifacts
+# ── Node / Frontend ───────────────────────────────────────────────────
 node_modules/
 dist/
 .DS_Store
 
-# OS files
+# ── Old HTML frontend (replaced by React/Vite SPA) ────────────────────
+frontend/
+
+# ── Old prototype folder ──────────────────────────────────────────────
+Generate frontend prototype/
+
+# ── Docs and non-essential files ──────────────────────────────────────
+DIGITAL_OCEAN_DEPLOYMENT.md
+ORACLE_DEPLOYMENT_GUIDE.md
+FIXES.md
+Fixes/
+guidelines/
+KAGGLE_WRITEUP.md
+docker-compose.yml
+.sixth/
+default_shadcn_theme.css
+
+# ── OS / Editor ───────────────────────────────────────────────────────
 Thumbs.db
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Test artifacts
+# ── Test artifacts ────────────────────────────────────────────────────
 .pytest_cache/
 htmlcov/
 .coverage
 coverage.xml
-
-# Docker
-.dockerignore
-
-# Build artifacts
 *.egg-info/
 build/
+
+# ── Logs ─────────────────────────────────────────────────────────────
+*.log
+logs/

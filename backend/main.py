@@ -16,8 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -203,10 +202,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files directories
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "frontend"))
-PROTOTYPE_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "dist"))
 
 @app.get("/api/v1/status", response_model=SystemStatus)
 async def get_status():
@@ -837,37 +832,6 @@ async def chat_websocket(websocket: WebSocket):
 async def health():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
-
-# ─── Static Files Catch-All (Must be at the bottom) ───────────────────────────
-
-@app.get("/{filename:path}", include_in_schema=False)
-async def serve_frontend(filename: str):
-    if not filename:
-        filename = "index.html"
-        
-    # Serve React Prototype if route starts with tracker/
-    if filename.startswith("tracker/"):
-        proto_filename = filename.replace("tracker/", "", 1) or "index.html"
-        proto_path = os.path.join(PROTOTYPE_DIR, proto_filename)
-        if os.path.exists(proto_path) and os.path.isfile(proto_path):
-            return FileResponse(proto_path)
-        # React SPA fallback
-        proto_index = os.path.join(PROTOTYPE_DIR, "index.html")
-        if os.path.exists(proto_index):
-            return FileResponse(proto_index)
-            
-    # Serve Vanilla JS RAKSHA UI
-    file_path = os.path.join(FRONTEND_DIR, filename)
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        return FileResponse(file_path)
-    
-    # SPA fallback for frontend routing
-    if not filename.startswith("api/") and not filename.startswith("ws/"):
-        index_path = os.path.join(FRONTEND_DIR, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
-            
-    raise HTTPException(status_code=404, detail="Not found")
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
