@@ -1,14 +1,34 @@
-import { useState, useCallback } from "react";
-import { Navigate } from "react-router";
+import { useState, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router";
 import { useAuth } from "../../contexts/AuthContext";
 
 export function AuthPage() {
   const { user, loading, signInWithGoogle } = useAuth();
+  const navigate = useNavigate();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Already authenticated → redirect
-  if (!loading && user) return <Navigate to="/app/dashboard" replace />;
+  // Redirect authenticated users to dashboard in an effect — never during render.
+  // Rendering <Navigate> synchronously causes React Error #300 when the auth state
+  // update happens inside a microtask (queueMicrotask in AuthContext), because
+  // React sees a render-phase navigation triggered by a post-render state change.
+  useEffect(() => {
+    if (!loading && user) {
+      navigate("/app/dashboard", { replace: true });
+    }
+  }, [user, loading, navigate]);
+
+  // While loading or navigating away — show loading indicator, not the form
+  if (loading || (!loading && user)) {
+    return (
+      <div className="bg-hero-bg min-h-screen flex items-center justify-center">
+        <span
+          className="w-6 h-6 rounded-full border-2 border-primary/40 border-t-primary inline-block"
+          style={{ animation: "spin 0.75s linear infinite" }}
+        />
+      </div>
+    );
+  }
 
   const handleGoogleSignIn = useCallback(async () => {
     setIsAuthenticating(true);
