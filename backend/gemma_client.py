@@ -335,40 +335,62 @@ class GemmaClient:
         fhir_history: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """
-        AI-powered medical triage using START protocol.
+        AI-powered medical triage using START protocol with detailed clinical guidance.
         Routes through Gemma 4 when available for best accuracy.
         """
-        vitals_str = json.dumps(vitals) if vitals else "Not provided"
+        vitals_str = json.dumps(vitals) if vitals else "Not measured"
         fhir_str = ""
         if fhir_history:
             from medical_rag import med_rag
             fhir_str = med_rag.parse_fhir_history(fhir_history)
 
         prompt = (
-            f"You are an expert emergency medical triage AI using START protocol.\n"
-            f"Patient: Age={age_estimate or 'Unknown'}, Symptoms={', '.join(symptoms)}\n"
+            f"You are an expert emergency medical officer using the START triage protocol in a mass casualty incident.\n"
+            f"Patient demographics: Age={age_estimate or 'Unknown'}\n"
+            f"Presenting symptoms: {', '.join(symptoms)}\n"
             f"Vitals: {vitals_str}\n"
             f"{f'Medical History: {fhir_str}' if fhir_str else ''}\n\n"
-            f"Return ONLY valid JSON:\n"
-            f'{{"triage_color": "<red|yellow|green|black>", "priority_level": <1-4>, '
-            f'"immediate_remedy": ["<step>"], "precautions": ["<precaution>"], '
-            f'"medical_summary": "<2 sentence explanation>"}}\n'
+            f"Perform a comprehensive clinical assessment and return ONLY valid JSON with these exact keys:\n"
+            f'{{"triage_color": "<red|yellow|green|black>", '
+            f'"priority_level": <1-10 where 10=most critical>, '
+            f'"immediate_remedy": ["<specific immediate action 1>", "<action 2>", "<action 3>"], '
+            f'"precautions": ["<precaution or contraindication 1>", "<precaution 2>"], '
+            f'"medical_summary": "<3-4 sentence clinical summary with likely diagnosis and reasoning>", '
+            f'"differential_diagnosis": ["<most likely diagnosis>", "<alternative 1>", "<alternative 2>"], '
+            f'"shock_assessment": "<none|suspected|confirmed> - <reasoning>", '
+            f'"vitals_targets": "<target BP, SpO2, HR to aim for during stabilization>", '
+            f'"medications_consider": ["<medication/intervention if available>"], '
+            f'"transport_priority": "<immediate transport|stabilize first|can wait|deceased>", '
+            f'"monitoring_intervals": "<how often to reassess in minutes>"}}\n'
+            f"Be specific, clinical, and actionable. This will be used by field medics.\n"
             f"Respond in language: {language}."
         )
 
-        result = await self.chat(message=prompt, enable_tools=False,
-                                 system_override="You are a medical triage AI. Output only valid JSON.")
+        result = await self.chat(
+            message=prompt,
+            enable_tools=False,
+            system_override=(
+                "You are a senior emergency physician providing mass-casualty triage guidance. "
+                "Output ONLY valid JSON. Be specific and clinically detailed — field medics depend on this."
+            ),
+        )
         parsed = self._extract_json(result.get("message", "")) or {}
 
         return {
-            "triage_color": parsed.get("triage_color", "yellow").lower().strip(),
-            "priority_level": parsed.get("priority_level", 2),
-            "immediate_remedy": parsed.get("immediate_remedy", ["Stabilize", "Monitor vitals"]),
-            "precautions": parsed.get("precautions", ["Avoid moving", "Keep warm"]),
-            "medical_summary": parsed.get("medical_summary", "Awaiting human evaluation."),
-            "reasoning": parsed.get("medical_summary", ""),
+            "triage_color":         parsed.get("triage_color", "yellow").lower().strip(),
+            "priority_level":       parsed.get("priority_level", 5),
+            "immediate_remedy":     parsed.get("immediate_remedy", ["Stabilize patient", "Monitor vitals", "Prepare for transport"]),
+            "precautions":          parsed.get("precautions", ["Do not move if spinal injury suspected", "Keep patient warm"]),
+            "medical_summary":      parsed.get("medical_summary", "Awaiting full clinical evaluation."),
+            "differential_diagnosis": parsed.get("differential_diagnosis", []),
+            "shock_assessment":     parsed.get("shock_assessment", "Not assessed"),
+            "vitals_targets":       parsed.get("vitals_targets", "BP >90 systolic, SpO2 >94%, HR <100"),
+            "medications_consider": parsed.get("medications_consider", []),
+            "transport_priority":   parsed.get("transport_priority", "Assess on site"),
+            "monitoring_intervals": parsed.get("monitoring_intervals", "Every 5 minutes"),
+            "reasoning":            parsed.get("medical_summary", ""),
             "immediate_interventions": parsed.get("immediate_remedy", []),
-            "model_used": result.get("model_used", "raksha-triage-ai"),
+            "model_used":           result.get("model_used", "raksha-triage-ai"),
         }
 
     async def translate_alert(self, message: str, target_languages: List[str]) -> Dict[str, str]:

@@ -72,7 +72,11 @@ export function FormTextarea({ className, ...props }: TextareaHTMLAttributes<HTM
 
 export function FormSelect({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement> & { children: ReactNode }) {
   return (
-    <select className={cn(inputBase, "cursor-pointer", className)} {...props}>
+    <select
+      className={cn(inputBase, "cursor-pointer appearance-none", className)}
+      style={{ colorScheme: "dark" }}
+      {...props}
+    >
       {children}
     </select>
   );
@@ -221,19 +225,23 @@ export function MetricCard({ label, value }: { label: string; value: number }) {
 
 // ── Section Card ─────────────────────────────────────────────────────────────
 
+import type { CSSProperties } from "react";
+
 export function SectionCard({
   title,
   action,
   children,
   className,
+  style,
 }: {
   title?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }) {
   return (
-    <div className={cn("bg-white/[0.03] border border-white/[0.07] rounded-xl overflow-hidden", className)}>
+    <div className={cn("bg-white/[0.03] border border-white/[0.07] rounded-xl overflow-hidden", className)} style={style}>
       {title && (
         <div className="px-6 py-4 border-b border-white/[0.06] flex items-center justify-between">
           <span className="text-foreground text-sm font-semibold">{title}</span>

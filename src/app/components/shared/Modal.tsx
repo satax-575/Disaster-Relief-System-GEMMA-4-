@@ -46,12 +46,13 @@ export function Modal({ open, onClose, title, subtitle, children, className }: M
   return (
     // Overlay
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      className="fixed inset-0 z-[10000] flex items-center justify-center px-4"
       style={{
         background:  "rgba(0,0,0,0.70)",
         backdropFilter: "blur(4px)",
         animation:   "fade-in 0.15s ease-out both",
         willChange:  "opacity",
+        isolation:   "isolate",
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       role="dialog"

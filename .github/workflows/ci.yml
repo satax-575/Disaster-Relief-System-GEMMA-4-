@@ -1,0 +1,70 @@
+name: RAKSHA AI CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-validate:
+    name: Lint & Syntax Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Syntax check — all backend Python files
+        run: |
+          python -m py_compile backend/config.py
+          python -m py_compile backend/providers.py
+          python -m py_compile backend/gemma_client.py
+          python -m py_compile backend/vision_agent.py
+          python -m py_compile backend/multimodal_connectors.py
+          python -m py_compile backend/ai_core.py
+          python -m py_compile backend/triage_agent.py
+          python -m py_compile backend/medical_rag.py
+          python -m py_compile backend/database.py
+          python -m py_compile backend/models.py
+          python -m py_compile backend/main.py
+          echo "✅ All backend files pass syntax check"
+
+      - name: Verify .env.example exists and has no real secrets
+        run: |
+          test -f backend/.env.example || (echo "❌ .env.example missing" && exit 1)
+          if grep -qE 'AIzaSy[0-9A-Za-z_-]{33}' backend/.env.example; then
+            echo "❌ Real Google API key found in .env.example!" && exit 1
+          fi
+          if grep -qE 'hf_[0-9A-Za-z]{30,}' backend/.env.example; then
+            echo "❌ Real HuggingFace token found in .env.example!" && exit 1
+          fi
+          if grep -qE 'gsk_[0-9A-Za-z]{40,}' backend/.env.example; then
+            echo "❌ Real Groq API key found in .env.example!" && exit 1
+          fi
+          echo "✅ .env.example is clean (no real secrets)"
+
+      - name: Verify .gitignore excludes .env
+        run: |
+          if git check-ignore -q backend/.env 2>/dev/null || grep -q "^\.env$\|^backend/\.env$" .gitignore; then
+            echo "✅ .env is gitignored"
+          else
+            echo "❌ .env may not be gitignored!" && exit 1
+          fi
+
+      - name: Check .env is not committed
+        run: |
+          if git ls-files backend/.env | grep -q backend/.env; then
+            echo "❌ SECURITY: backend/.env is tracked by git!" && exit 1
+          fi
+          echo "✅ backend/.env is not committed"

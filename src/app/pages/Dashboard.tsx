@@ -66,7 +66,7 @@ export function Dashboard() {
       </div>
 
       {/* Row 2 — Map */}
-      <SectionCard title="Live Incident Map" className="mt-6">
+      <SectionCard title="Live Incident Map" className="mt-6" style={{ isolation: "isolate" }}>
         <div style={{ height: 380, position: "relative" }}>
           <Suspense
             fallback={

@@ -7,10 +7,10 @@ import {
 import type { DamageAssessmentResult } from "../../lib/types";
 import { assessDamage, ApiError } from "../../lib/api";
 
-const SYSTEM_LABEL = "Powered by RAKSHAK AI Vision";
+const SYSTEM_LABEL = "Gemma 4 31B Vision";
 
 // Normalise the backend response to the frontend type
-function normaliseResult(raw: Record<string, unknown>): DamageAssessmentResult {
+function normaliseResult(raw: Record<string, unknown>): DamageAssessmentResult & { modelUsed?: string } {
   // Backend returns snake_case numbers; frontend type uses PascalCase strings
   const severityNum = typeof raw.damage_severity === "number" ? raw.damage_severity : 5;
   const severityLabel: DamageAssessmentResult["damageSeverity"] =
@@ -20,11 +20,12 @@ function normaliseResult(raw: Record<string, unknown>): DamageAssessmentResult {
 
   return {
     damageSeverity:          (raw.damageSeverity as DamageAssessmentResult["damageSeverity"]) ?? severityLabel,
-    structuralAssessment:    (raw.structuralAssessment as string) ?? (raw.structural_integrity as string) ?? "Assessment unavailable.",
+    structuralAssessment:    (raw.structuralAssessment as string) ?? (raw.structural_integrity as string) ?? (raw.intelligence_summary as string) ?? "Assessment unavailable.",
     identifiedHazards:       (raw.identifiedHazards as string[]) ?? (raw.hazards as string[]) ?? [],
     estimatedTrappedPersons: (raw.estimatedTrappedPersons as number) ?? (raw.estimated_trapped as number) ?? 0,
     recommendedActions:      (raw.recommendedActions as string[]) ?? (raw.recommended_actions as string[]) ?? [],
     confidenceScore:         Math.round(((raw.confidenceScore as number) ?? (raw.confidence as number) ?? 0.5) * 100),
+    modelUsed:               (raw.model_used as string) ?? undefined,
   };
 }
 
@@ -37,12 +38,15 @@ export function AssessPage() {
   const [disasterType, setDisasterType] = useState("");
   const [buildingType, setBuildingType] = useState("");
   const [loading, setLoading]           = useState(false);
-  const [result, setResult]             = useState<DamageAssessmentResult | null>(null);
+  const [result, setResult]             = useState<(DamageAssessmentResult & { modelUsed?: string }) | null>(null);
   const [isDragOver, setIsDragOver]     = useState(false);
   const abortRef                        = useRef<AbortController | null>(null);
 
   const topbarRight = useMemo(() => (
-    <span className="text-muted-foreground/60 text-sm">{SYSTEM_LABEL}</span>
+    <div className="flex items-center gap-2">
+      <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+      <span className="text-muted-foreground/60 text-sm">{SYSTEM_LABEL}</span>
+    </div>
   ), []);
 
   useEffect(() => {
@@ -98,8 +102,8 @@ export function AssessPage() {
     } catch (err: unknown) {
       if ((err as { name?: string })?.name === "AbortError") return;
       const msg = err instanceof ApiError
-        ? `Assessment failed (${err.status}). Check backend connectivity.`
-        : "Assessment failed. Ensure the backend is running.";
+        ? `Assessment failed (${err.status}): ${(err as ApiError).message.slice(0, 100)}. Upload a photo and try again.`
+        : "Assessment failed. Ensure backend is running and an image is selected.";
       toast.error(msg);
     } finally {
       setLoading(false);

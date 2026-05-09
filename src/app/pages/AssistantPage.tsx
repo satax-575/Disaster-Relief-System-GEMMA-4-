@@ -14,13 +14,55 @@ const QUICK_PROMPTS = [
   "Emergency contact protocol",
 ];
 
-// ── Typing indicator with CSS-animation dots (no inline <style>) ─────────────
+// ── Typing indicator ──────────────────────────────────────────────────────────
 function TypingIndicator() {
   return (
     <div className="mr-auto bg-white/[0.04] border border-white/[0.08] text-foreground text-sm px-4 py-3 rounded-xl rounded-bl-none max-w-[75%] flex items-center gap-1">
       <span className="typing-dot" />
       <span className="typing-dot" style={{ animationDelay: "0.15s" }} />
       <span className="typing-dot" style={{ animationDelay: "0.30s" }} />
+    </div>
+  );
+}
+
+// ── Markdown-lite renderer: bold, bullet lists ────────────────────────────────
+function MessageContent({ text }: { text: string }) {
+  // Split by newlines, render simple markdown
+  const lines = text.split("\n");
+  return (
+    <div className="space-y-1">
+      {lines.map((line, i) => {
+        // Bold: **text**
+        const parts = line.split(/\*\*(.*?)\*\*/g);
+        const rendered = parts.map((part, j) =>
+          j % 2 === 1 ? <strong key={j} className="font-semibold text-foreground">{part}</strong> : part
+        );
+        // Bullet
+        if (line.startsWith("- ") || line.startsWith("• ")) {
+          return (
+            <div key={i} className="flex gap-2">
+              <span className="text-primary flex-shrink-0 mt-0.5">•</span>
+              <span>{rendered}</span>
+            </div>
+          );
+        }
+        // Numbered list
+        if (/^\d+\.\s/.test(line)) {
+          const num = line.match(/^(\d+)\.\s/)?.[1];
+          const rest = line.replace(/^\d+\.\s/, "");
+          const restParts = rest.split(/\*\*(.*?)\*\*/g).map((p, j) =>
+            j % 2 === 1 ? <strong key={j} className="font-semibold text-foreground">{p}</strong> : p
+          );
+          return (
+            <div key={i} className="flex gap-2">
+              <span className="text-primary font-bold flex-shrink-0 mt-0.5">{num}.</span>
+              <span>{restParts}</span>
+            </div>
+          );
+        }
+        if (line === "") return <div key={i} className="h-1" />;
+        return <p key={i}>{rendered}</p>;
+      })}
     </div>
   );
 }
@@ -36,12 +78,12 @@ export function AssistantPage() {
   const bottomRef                 = useRef<HTMLDivElement>(null);
   const abortRef                  = useRef<AbortController | null>(null);
   const sessionIdRef              = useRef<string | undefined>(undefined);
+  const chatAreaRef               = useRef<HTMLDivElement>(null);
 
-  // Stable topbar content
   const topbarRight = useMemo(() => (
     <div className="flex items-center gap-2">
       <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-      <span className="text-muted-foreground/60 text-sm">Connected</span>
+      <span className="text-muted-foreground/60 text-sm">Gemma 4 31B · Connected</span>
     </div>
   ), []);
 
@@ -49,7 +91,7 @@ export function AssistantPage() {
     set({ title: "Field Assistant", right: topbarRight });
   }, [set, topbarRight]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing]);
@@ -100,13 +142,14 @@ export function AssistantPage() {
           role:      "assistant",
           content:   resp.message,
           timestamp: new Date(),
+          modelUsed: resp.model_used,
         },
       ]);
     } catch (err: unknown) {
       if ((err as { name?: string })?.name === "AbortError") return;
       const msg = err instanceof ApiError
-        ? `AI unavailable (${err.status}). Try again shortly.`
-        : "Failed to reach AI assistant.";
+        ? `AI unavailable (${err.status}). Backend may be starting up — try again in 30s.`
+        : "Failed to reach AI assistant. Check connection.";
       toast.error(msg);
     } finally {
       setTyping(false);
@@ -129,19 +172,53 @@ export function AssistantPage() {
       setImageFile({ base64: dataUrl.split(",")[1], type: file.type });
     };
     reader.readAsDataURL(file);
-    // Reset input so same file can be re-selected
     e.target.value = "";
   };
 
+  const clearChat = () => {
+    abortRef.current?.abort();
+    setMessages([]);
+    sessionIdRef.current = undefined;
+  };
+
   return (
-    <div className="rakshak-chat-shell -m-8 flex flex-col">
-      {/* Chat area */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+    // Full-height flex column that fills the content area edge-to-edge
+    // Negative margins cancel out AppLayout's p-4 md:p-8 padding
+    <div
+      className="flex flex-col -m-4 md:-m-8"
+      style={{ height: "calc(100vh - 56px)" }}
+    >
+      {/* Chat history header row — only show when messages exist */}
+      {messages.length > 0 && (
+        <div
+          className="flex items-center justify-between px-6 py-2 flex-shrink-0"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+        >
+          <span className="text-muted-foreground/40 text-xs">
+            {messages.filter(m => m.role === "user").length} messages · Session active
+          </span>
+          <button
+            onClick={clearChat}
+            className="text-muted-foreground/40 text-xs hover:text-destructive transition-colors"
+          >
+            Clear chat
+          </button>
+        </div>
+      )}
+
+      {/* Scrollable chat area */}
+      <div ref={chatAreaRef} className="flex-1 overflow-y-auto px-6 py-6">
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full">
+          <div className="flex flex-col items-center justify-center h-full min-h-[300px]">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-4">
+              <span className="text-2xl">🛡️</span>
+            </div>
             <p className="text-foreground text-xl font-semibold text-center">RAKSHAK AI Assistant</p>
             <p className="mt-2 text-muted-foreground/50 text-sm text-center max-w-sm">
               Damage assessment · Evacuation guidance · Medical triage · Emergency coordination
+            </p>
+            <p className="mt-1 text-muted-foreground/25 text-xs text-center">
+              Powered by Gemma 4 31B
             </p>
             {user && (
               <p className="mt-1 text-muted-foreground/30 text-xs text-center">
@@ -165,8 +242,8 @@ export function AssistantPage() {
             {messages.map((msg) => (
               <div key={msg.id}>
                 <div className={msg.role === "user"
-                  ? "ml-auto bg-primary/[0.12] border border-primary/20 text-foreground text-sm px-4 py-3 rounded-xl rounded-br-none max-w-[75%]"
-                  : "mr-auto bg-white/[0.04] border border-white/[0.08] text-foreground text-sm px-4 py-3 rounded-xl rounded-bl-none max-w-[75%] leading-relaxed"
+                  ? "ml-auto bg-primary/[0.12] border border-primary/20 text-foreground text-sm px-4 py-3 rounded-xl rounded-br-none max-w-[80%]"
+                  : "mr-auto bg-white/[0.04] border border-white/[0.08] text-foreground/90 text-sm px-4 py-3 rounded-xl rounded-bl-none max-w-[80%] leading-relaxed"
                 }>
                   {msg.imageUrl && (
                     <img
@@ -175,11 +252,22 @@ export function AssistantPage() {
                       className="max-h-40 rounded-lg mb-2 object-cover"
                     />
                   )}
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {msg.role === "assistant" ? (
+                    <MessageContent text={msg.content} />
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  )}
                 </div>
-                <p className={`text-[10px] text-muted-foreground/30 mt-1 ${msg.role === "user" ? "text-right" : "text-left"}`}>
-                  {msg.timestamp.toLocaleTimeString("en-US", { hour12: true })}
-                </p>
+                <div className={`flex items-center gap-2 mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <p className="text-[10px] text-muted-foreground/30">
+                    {msg.timestamp.toLocaleTimeString("en-US", { hour12: true })}
+                  </p>
+                  {msg.role === "assistant" && (msg as AppChatMessage & { modelUsed?: string }).modelUsed && (
+                    <p className="text-[10px] text-muted-foreground/20">
+                      · {(msg as AppChatMessage & { modelUsed?: string }).modelUsed}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
             {typing && <TypingIndicator />}
@@ -188,9 +276,26 @@ export function AssistantPage() {
         )}
       </div>
 
+      {/* Attached image preview */}
+      {imageFile && (
+        <div
+          className="px-6 py-2 flex items-center gap-3 flex-shrink-0"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
+        >
+          <span className="text-primary text-xs">📎 Image attached</span>
+          <button
+            type="button"
+            onClick={() => setImageFile(null)}
+            className="text-muted-foreground/40 text-xs hover:text-destructive transition-colors"
+          >
+            Remove
+          </button>
+        </div>
+      )}
+
       {/* Input row */}
       <div
-        className="px-6 py-4 flex items-center gap-3"
+        className="px-6 py-4 flex items-center gap-3 flex-shrink-0"
         style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "hsl(0 0% 8%)" }}
       >
         <button
@@ -210,30 +315,25 @@ export function AssistantPage() {
         />
 
         <div className="flex-1 relative">
-          <input
-            type="text"
-            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:border-primary/30 transition-colors"
-            placeholder={imageFile ? "Image attached — ask anything..." : "Ask anything..."}
+          <textarea
+            rows={1}
+            className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:border-primary/30 transition-colors resize-none overflow-hidden"
+            placeholder="Ask anything about emergency response…"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              // Auto-grow (max 3 rows)
+              e.target.style.height = "auto";
+              e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
+            }}
             onKeyDown={handleKeyDown}
           />
-          {imageFile && (
-            <button
-              type="button"
-              title="Remove image"
-              onClick={() => setImageFile(null)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-primary text-[10px] hover:text-destructive transition-colors"
-            >
-              ✕
-            </button>
-          )}
         </div>
 
         <button
           onClick={() => sendMessage(input, imageFile ?? undefined)}
           disabled={(!input.trim() && !imageFile) || typing}
-          className="w-9 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:brightness-110 active:scale-95 transition-all flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none"
+          className="w-9 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:brightness-110 active:scale-95 transition-all flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none flex-shrink-0"
           title="Send"
         >
           →

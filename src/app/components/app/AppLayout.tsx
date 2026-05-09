@@ -207,7 +207,7 @@ export function AppLayout() {
           <header
             className="fixed top-0 left-0 md:left-60 right-0 h-14 flex items-center justify-between px-4 md:px-8 z-40"
             style={{
-              background:   "hsl(0 0% 8% / 0.8)",
+              background:   "hsl(0 0% 8% / 0.9)",
               borderBottom: "1px solid rgba(255,255,255,0.06)",
               backdropFilter: "blur(8px)",
             }}
@@ -234,9 +234,15 @@ export function AppLayout() {
             {topbar.right && <div className="flex items-center">{topbar.right}</div>}
           </header>
 
-          {/* Page content */}
-          <main ref={mainRef} className="pt-14 flex-1 p-4 md:p-8">
-            <Outlet />
+          {/* Page content — scrollable area below fixed topbar */}
+          <main
+            ref={mainRef}
+            className="flex-1 overflow-y-auto"
+            style={{ paddingTop: "56px" }} // exactly matches h-14
+          >
+            <div className="p-4 md:p-8">
+              <Outlet />
+            </div>
           </main>
         </div>
       </div>

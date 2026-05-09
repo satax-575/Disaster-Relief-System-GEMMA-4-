@@ -381,9 +381,19 @@ async def assess_damage(
 @app.post("/api/v1/assess/base64")
 async def assess_damage_base64(request: AssessmentRequest):
     """Damage assessment with base64 image (for offline/JS uploads)."""
+    # disaster_type arrives as a plain string from the JS frontend, not an Enum.
+    # Handle both string and Enum safely to avoid AttributeError.
+    disaster_type_str = None
+    if request.disaster_type:
+        disaster_type_str = (
+            request.disaster_type.value
+            if hasattr(request.disaster_type, "value")
+            else str(request.disaster_type)
+        )
+
     assessment_data = await gemma_client.assess_damage(
         image_base64=request.image_base64,
-        disaster_type=request.disaster_type.value if request.disaster_type else None,
+        disaster_type=disaster_type_str,
         building_type=request.building_type,
         language=request.language
     )
