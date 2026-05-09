@@ -36,42 +36,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // Track whether this is the initial auth check or a new sign-in.
-  // On initial page load, onAuthStateChanged fires once to hydrate state.
-  // On sign-in, it fires again — that second fire should trigger navigation.
+  // Track whether this is the FIRST auth state notification (page load hydration)
+  // or a subsequent one triggered by signing in.
   const isInitialCheckRef = useRef(true);
-  // Track if sign-in is in progress so we keep loading=true until
-  // onAuthStateChanged confirms the user, preventing ProtectedRoute from
-  // seeing user=null,loading=false and redirecting to /auth.
+  // Track if the user explicitly clicked "Sign in with Google"
   const signingInRef = useRef(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
-
-      // On sign-in (not initial load): navigate to dashboard.
-      // This runs AFTER Firebase confirms the auth state, so ProtectedRoute
-      // will see user != null and render the dashboard correctly.
-      if (!isInitialCheckRef.current && firebaseUser && signingInRef.current) {
-        signingInRef.current = false;
-        navigate("/app/dashboard", { replace: true });
-      }
-      if (!isInitialCheckRef.current && !firebaseUser) {
-        signingInRef.current = false;
-      }
-
+      // React Error #300 guard: defer state updates out of the render cycle.
+      // onAuthStateChanged can fire synchronously in some Firebase SDK versions
+      // (e.g., when the token is already in cache). Deferring with queueMicrotask
+      // ensures we are not updating state while another component is rendering.
+      const isInitial = isInitialCheckRef.current;
+      const wasSigningIn = signingInRef.current;
       isInitialCheckRef.current = false;
+
+      queueMicrotask(() => {
+        setUser(firebaseUser);
+        setLoading(false);
+
+        // Only navigate to dashboard when the user explicitly signed in
+        // (not on the initial page-load hydration). This prevents a navigation
+        // conflict when AuthPage is rendering and onAuthStateChanged fires for
+        // a persisted session.
+        if (!isInitial && firebaseUser && wasSigningIn) {
+          signingInRef.current = false;
+          navigate("/app/dashboard", { replace: true });
+        }
+        if (!isInitial && !firebaseUser) {
+          signingInRef.current = false;
+        }
+      });
     });
-    return unsubscribe; // cleanup on unmount
+    return unsubscribe;
+  // navigate is stable from React Router; intentionally omitted from deps.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signInWithGoogle = async () => {
     try {
       // Keep loading=true while the popup + onAuthStateChanged flow completes.
-      // This prevents ProtectedRoute from briefly seeing user=null,loading=false
-      // and redirecting to /auth before Firebase auth state is settled.
+      // ProtectedRoute checks `loading` before redirecting — keeping it true
+      // prevents a flash-of-unauthenticated-redirect.
       setLoading(true);
       signingInRef.current = true;
 
@@ -91,8 +98,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { merge: true }
       );
 
-      // Do NOT navigate here — let onAuthStateChanged do it above.
-      // That ensures user state is fully settled in React before navigation.
+      // Navigation is handled by the onAuthStateChanged callback above.
+      // That fires AFTER React has finished rendering, so state is settled.
     } catch (err) {
       console.error("[RAKSHAK] Google sign-in failed:", err);
       signingInRef.current = false;
