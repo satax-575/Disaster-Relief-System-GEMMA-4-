@@ -1,0 +1,4 @@
+/* Tailwind must be first so PostCSS resolves its @import before other CSS */
+@import './tailwind.css';
+@import './fonts.css';
+@import './theme.css';

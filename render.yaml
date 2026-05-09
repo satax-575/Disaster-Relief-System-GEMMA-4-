@@ -1,0 +1,86 @@
+# render.yaml — RAKSHAK AI Render.com Deployment Blueprint
+# ============================================================
+# Deploys two services:
+#   1. rakshak-backend  — FastAPI backend (Docker)
+#   2. rakshak-frontend — React/Vite static site
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+
+  # ── 1. FastAPI Backend ───────────────────────────────────────────────────
+  - type: web
+    name: rakshak-backend
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free           # Upgrade to starter for always-on
+    healthCheckPath: /health
+    envVars:
+      # ── Required — set in Render Dashboard ───────────────────────────────
+      - key: GOOGLE_API_KEY
+        sync: false      # Primary AI provider — set via Render dashboard
+
+      # ── CORS — allow both Render frontend + Firebase Hosting ─────────────
+      - key: CORS_ORIGINS
+        value: '["https://rakshak-frontend.onrender.com","https://gemma-4-rakshak-ai.web.app","https://gemma-4-rakshak-ai.firebaseapp.com"]'
+
+      # ── Optional AI fallbacks — set in Render Dashboard ──────────────────
+      - key: HUGGINGFACE_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+
+      # ── App config ───────────────────────────────────────────────────────
+      - key: DATABASE_URL
+        value: ./raksha.db
+      - key: APP_NAME
+        value: RAKSHA AI
+      - key: DEBUG
+        value: "false"
+      - key: PORT
+        value: "8000"
+      - key: GEMMA_CLOUD_MODEL
+        value: gemma-4-31b-it
+      - key: OLLAMA_BASE_URL
+        value: http://localhost:11434
+
+  # ── 2. React/Vite Static Site ────────────────────────────────────────────
+  - type: web
+    name: rakshak-frontend
+    runtime: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: false
+    routes:
+      # SPA fallback — all routes serve index.html (React Router handles them)
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # ── Backend URL ───────────────────────────────────────────────────────
+      - key: VITE_BACKEND_URL
+        value: https://rakshak-backend.onrender.com
+
+      # ── Firebase — public config (protected by Firebase Security Rules) ──
+      # Firebase config is intentionally public; security comes from Rules, not key secrecy
+      - key: VITE_FIREBASE_API_KEY
+        value: AIzaSyD_UuU5v0sWH3nSTxwSAY60AeuuV934bjQ
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        value: gemma-4-rakshak-ai.firebaseapp.com
+      - key: VITE_FIREBASE_PROJECT_ID
+        value: gemma-4-rakshak-ai
+      - key: VITE_FIREBASE_APP_ID
+        value: 1:879818343352:web:ff25f7d0ac964060b4454d
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        value: gemma-4-rakshak-ai.firebasestorage.app
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        value: "879818343352"
+      - key: VITE_FIREBASE_MEASUREMENT_ID
+        value: G-5F714P0HG0
+
+      # ── UI config ─────────────────────────────────────────────────────────
+      - key: VITE_AI_MODEL_NAME
+        value: Gemma 4 31B
+

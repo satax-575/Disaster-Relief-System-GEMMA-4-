@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Environment / Secrets — NEVER COMMIT THESE
+.env
+.env.local
+.env.production
+.env.staging
+.env.*.local
+backend/.env
+*.env.*
+
+# Virtual environments
+.venv
+env/
+venv/
+ENV/
+.python-version
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+raksha.db*
+backend/*.db
+
+# Logs
+*.log
+logs/
+
+# Node / Frontend build artifacts
+node_modules/
+dist/
+.DS_Store
+
+# OS files
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Docker
+.dockerignore
+
+# Build artifacts
+*.egg-info/
+build/
