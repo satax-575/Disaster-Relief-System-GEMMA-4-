@@ -22,7 +22,7 @@ services:
 
       # ── CORS — allow both Render frontend + Firebase Hosting ─────────────
       - key: CORS_ORIGINS
-        value: '["https://rakshak-frontend.onrender.com","https://gemma-4-rakshak-ai.web.app","https://gemma-4-rakshak-ai.firebaseapp.com"]'
+        value: '["https://rakshak-frontend.onrender.com","https://gemma-4-rakshak-ai.web.app","https://gemma-4-rakshak-ai.firebaseapp.com","http://localhost:3000","http://localhost:5173"]'
 
       # ── Optional AI fallbacks — set in Render Dashboard ──────────────────
       - key: HUGGINGFACE_TOKEN
@@ -61,7 +61,7 @@ services:
     envVars:
       # ── Backend URL ───────────────────────────────────────────────────────
       - key: VITE_BACKEND_URL
-        value: https://rakshak-backend.onrender.com
+        value: https://rakshak-backend-p1g2.onrender.com
 
       # ── Firebase — public config (protected by Firebase Security Rules) ──
       # Firebase config is intentionally public; security comes from Rules, not key secrecy
