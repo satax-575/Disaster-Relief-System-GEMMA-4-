@@ -137,14 +137,14 @@ CAPABILITIES:
 RESPONSE FORMAT:
 - Start with the most critical action immediately
 - Use **bold** for key terms and action items
-- Keep language calm, clear, and directive — responders are under stress
+- Keep language highly curated, calm, clear, and directive — responders are under stress
 - End with next steps or reassessment criteria
 
 PRINCIPLES:
 1. Lives first — every response prioritizes human safety
-2. Be precise — specific actionable guidance only, never vague
+2. Be extremely precise — specific actionable guidance ONLY. NEVER use vague, filler, or general conversational statements.
 3. Use tools — call functions when real action is needed (dispatch, alert, evacuate)
-4. Stay calm — clear direct language, no panic language
+4. Curated Intelligence — Provide answers in highly structured, bulleted lists. Avoid long paragraphs.
 5. Language match — always respond in the user's language
 6. Context continuity — always acknowledge and build on previous messages in the conversation
 
@@ -312,8 +312,13 @@ class GemmaClient:
             if building_type:
                 context += f"Building type: {building_type}. "
 
+            # Gemma 4 is a text-to-text model. Sending raw images to the Google API causes 
+            # a 500 Internal Server Error. We extract a caption using BLIP first.
+            caption = await _get_vision_agent()._get_blip_caption(image_base64)
+            logger.info(f"Generated BLIP caption for Gemma 4 assessment: {caption}")
+
             prompt = (
-                f"You are a disaster assessment AI. Analyze this disaster scene image.\n"
+                f"You are a disaster assessment AI. Analyze this disaster scene description: '{caption}'.\n"
                 f"{context}\n"
                 f"Return ONLY valid JSON with these exact keys:\n"
                 f'{{"damage_severity": <1-10 float>, "hazards": ["..."], '
@@ -328,17 +333,18 @@ class GemmaClient:
                 result = await self._cloud_chat(
                     message=prompt,
                     history=[],
-                    image_base64=image_base64,
+                    image_base64=None, # Prevents the 500 error on the text endpoint
                     language=language,
                     enable_tools=False,
                     system_override="You are a precision disaster assessment AI. Output only valid JSON.",
                 )
                 parsed = self._extract_json(result.get("message", ""))
                 if parsed and "damage_severity" in parsed:
-                    parsed["model_used"] = f"gemma4-cloud-vision ({config.gemma_cloud_model})"
+                    parsed["model_used"] = f"gemma4-cloud ({config.gemma_cloud_model})"
+                    parsed["caption"] = caption
                     return parsed
             except Exception as e:
-                logger.warning(f"Cloud vision failed, falling back to BLIP pipeline: {e}")
+                logger.warning(f"Cloud text assessment failed, falling back to BLIP pipeline: {e}")
 
         # Fall back to BLIP + LLM vision pipeline
         assessment = await _get_vision_agent().analyze_incident_image(image_base64, language)
