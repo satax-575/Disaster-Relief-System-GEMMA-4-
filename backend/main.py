@@ -894,10 +894,18 @@ import os
 
 @app.get("/{catchall:path}")
 def serve_react_app(catchall: str):
+    from fastapi import HTTPException
     dist_dir = os.path.join(os.path.dirname(__file__), "..", "dist")
     file_path = os.path.join(dist_dir, catchall)
+    
     if os.path.exists(file_path) and os.path.isfile(file_path):
         return FileResponse(file_path)
+        
+    # If a specific static asset is requested and missing (e.g. from an old cached index.html), 
+    # return 404 instead of index.html to prevent MIME type syntax errors in the browser.
+    if catchall.startswith("assets/"):
+        raise HTTPException(status_code=404, detail="Asset not found")
+        
     return FileResponse(os.path.join(dist_dir, "index.html"))
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
