@@ -18,6 +18,17 @@ export function AuthPage() {
     }
   }, [user, loading, navigate]);
 
+  const handleGoogleSignIn = useCallback(async () => {
+    setIsAuthenticating(true);
+    setError(null);
+    try {
+      await signInWithGoogle();
+    } catch {
+      setError("Authentication failed. Please try again.");
+      setIsAuthenticating(false);
+    }
+  }, [signInWithGoogle]);
+
   // While loading or navigating away — show loading indicator, not the form
   if (loading || (!loading && user)) {
     return (
@@ -29,17 +40,6 @@ export function AuthPage() {
       </div>
     );
   }
-
-  const handleGoogleSignIn = useCallback(async () => {
-    setIsAuthenticating(true);
-    setError(null);
-    try {
-      await signInWithGoogle();
-    } catch {
-      setError("Authentication failed. Please try again.");
-      setIsAuthenticating(false);
-    }
-  }, [signInWithGoogle]);
 
   return (
     <div
