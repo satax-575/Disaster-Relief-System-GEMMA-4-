@@ -16,7 +16,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -886,6 +887,18 @@ async def health():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
+
+# ─── Static Files (UI Serving) ────────────────────────────────────────────────
+
+import os
+
+@app.get("/{catchall:path}")
+def serve_react_app(catchall: str):
+    dist_dir = os.path.join(os.path.dirname(__file__), "..", "dist")
+    file_path = os.path.join(dist_dir, catchall)
+    if os.path.exists(file_path) and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(dist_dir, "index.html"))
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
 
