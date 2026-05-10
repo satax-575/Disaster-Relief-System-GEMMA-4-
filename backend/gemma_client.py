@@ -114,27 +114,45 @@ RAKSHA_TOOLS = [
 
 # ── System Prompt ──────────────────────────────────────────────────────────────
 
-RAKSHA_SYSTEM_PROMPT = """You are RAKSHA AI — a Gemma 4-powered emergency disaster response intelligence system.
-You assist field responders, incident commanders, and affected citizens during active disasters.
+RAKSHA_SYSTEM_PROMPT = """You are RAKSHA AI — a Gemma 4-powered emergency disaster response intelligence system deployed in active disaster zones.
+You assist field responders, incident commanders, and affected citizens during REAL ongoing disasters.
+
+RESPONSE REQUIREMENTS (NON-NEGOTIABLE):
+1. ALWAYS give specific, actionable guidance — never vague or generic advice
+2. Use numbered steps for procedures, bullet points for lists
+3. If this is a follow-up question, explicitly reference the previous context
+4. MINIMUM 3-5 sentences of substantive content per response
+5. For medical/rescue queries: include specific techniques, dosages, timeframes
+6. For evacuation: include specific directions, landmarks, distances
+7. NEVER say "I cannot help with that" for disaster-related queries
+8. NEVER expose reasoning steps or thinking in your response
 
 CAPABILITIES:
 - Analyze disaster images: damage severity (1-10), hazards, structural integrity, trapped persons
-- Medical triage: START protocol (Red/Yellow/Green/Black classification)
+- Medical triage: START protocol (Red/Yellow/Green/Black classification) with specific clinical guidance
 - Emergency dispatch coordination via function tools
-- Multilingual evacuation guidance and survival protocols
+- Multilingual evacuation guidance and survival protocols  
 - Autonomous incident monitoring and response
+
+RESPONSE FORMAT:
+- Start with the most critical action immediately
+- Use **bold** for key terms and action items
+- Keep language calm, clear, and directive — responders are under stress
+- End with next steps or reassessment criteria
 
 PRINCIPLES:
 1. Lives first — every response prioritizes human safety
 2. Be precise — specific actionable guidance only, never vague
-3. Use tools — call functions when real action is needed
+3. Use tools — call functions when real action is needed (dispatch, alert, evacuate)
 4. Stay calm — clear direct language, no panic language
 5. Language match — always respond in the user's language
+6. Context continuity — always acknowledge and build on previous messages in the conversation
 
 FUNCTION CALLING: When a user requests an action (send help, broadcast alert, evacuate), 
 ALWAYS call the appropriate function tool. Do not just describe what could be done.
 
-Model: Gemma 4 | Provider: Google AI API + Ollama Local Fallback"""
+Model: Gemma 4 31B | Provider: Google AI API + Ollama Local Fallback
+Deployment: Active disaster response operations"""
 
 
 # ── Model Selector ─────────────────────────────────────────────────────────────
@@ -424,6 +442,14 @@ class GemmaClient:
         lang_hint = f"\n[Respond in language: {language}]" if language != "en" else ""
         parts.append({"text": message + lang_hint})
 
+        sys_prompt = system_override or RAKSHA_SYSTEM_PROMPT
+        is_gemma = "gemma" in config.gemma_cloud_model.lower()
+
+        # Gemma models do not support systemInstruction natively on some endpoints.
+        # We inject the system prompt into the first message to guarantee it works.
+        if is_gemma and not history:
+            parts.insert(0, {"text": f"[SYSTEM INSTRUCTION]\n{sys_prompt}\n\n[USER INPUT]\n"})
+
         contents = []
         for h in history[-10:]:
             role = "user" if h.get("role") == "user" else "model"
@@ -432,11 +458,12 @@ class GemmaClient:
 
         body: Dict = {
             "contents": contents,
-            "systemInstruction": {"parts": [{"text": system_override or RAKSHA_SYSTEM_PROMPT}]},
-            "generationConfig": {"temperature": 0.4, "topP": 0.9, "maxOutputTokens": 2048},
+            "generationConfig": {"temperature": 0.3, "topP": 0.9, "maxOutputTokens": 4096},
         }
-        if enable_tools:
-            body["tools"] = [{"function_declarations": RAKSHA_TOOLS}]
+        if not is_gemma:
+            body["systemInstruction"] = {"parts": [{"text": sys_prompt}]}
+            if enable_tools:
+                body["tools"] = [{"function_declarations": RAKSHA_TOOLS}]
 
         url = (
             f"{config.gemma_api_base}/models/{config.gemma_cloud_model}"
@@ -482,7 +509,11 @@ class GemmaClient:
         for fc in fc_list:
             fr_list.append({"name": fc["name"], "result": self._execute_tool(fc["name"], fc["args"])})
 
-        msg = "\n".join(text_parts) if text_parts else self._summarize_results(fr_list)
+        raw_msg = "\n".join(text_parts) if text_parts else self._summarize_results(fr_list)
+        # Strip <think>...</think> blocks — internal reasoning should never reach the user
+        msg = re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_msg, flags=re.IGNORECASE).strip()
+        if not msg:
+            msg = raw_msg.strip()  # fallback if everything was thinking
         return {"message": msg, "model_used": config.gemma_cloud_model,
                 "function_calls": fc_list, "function_results": fr_list}
 

@@ -686,6 +686,49 @@ async def get_triage_guidance(request: TriageGuidanceRequest):
     return guidance
 
 
+@app.post("/api/v1/triage/guidance/stream")
+async def get_triage_guidance_stream(request: TriageGuidanceRequest):
+    """Streaming SSE triage guidance — sends progress events so the frontend
+    shows real-time feedback instead of a blank wait screen.
+    Events: analyzing | processing | complete | error
+    """
+    from fastapi.responses import StreamingResponse
+    import json as _json
+
+    async def event_stream():
+        def sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {_json.dumps(data)}\n\n"
+
+        try:
+            yield sse("analyzing", {"stage": "Analyzing symptoms with Gemma 4...", "progress": 20})
+            await asyncio.sleep(0)  # flush
+
+            yield sse("processing", {"stage": "Applying START triage protocol...", "progress": 60})
+            await asyncio.sleep(0)
+
+            guidance = await gemma_client.generate_triage_guidance(
+                symptoms=request.symptoms,
+                age_estimate=request.age_estimate,
+                vitals=None,
+                language=request.language,
+            )
+
+            yield sse("complete", {"stage": "Assessment complete", "progress": 100, "result": guidance})
+
+        except Exception as e:
+            logger.error(f"Streaming triage error: {e}")
+            yield sse("error", {"message": str(e)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ─── Alerts ───────────────────────────────────────────────────────────────────
 
 @app.post("/api/v1/alerts", status_code=201)

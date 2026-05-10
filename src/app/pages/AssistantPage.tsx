@@ -14,6 +14,18 @@ const QUICK_PROMPTS = [
   "Emergency contact protocol",
 ];
 
+// ── Strip <think>...</think> blocks from AI response ─────────────────────────
+function extractThinkingAndContent(raw: string): { thinking: string; content: string } {
+  const thinkMatch = raw.match(/^[\s\S]*?<think>([\s\S]*?)<\/think>\s*/i);
+  if (thinkMatch) {
+    const thinking = thinkMatch[1].trim();
+    const content = raw.slice(thinkMatch[0].length).trim();
+    return { thinking, content };
+  }
+  // Also handle models that output thinking without tags but with "Let me think..." patterns
+  return { thinking: "", content: raw.trim() };
+}
+
 // ── Typing indicator ──────────────────────────────────────────────────────────
 function TypingIndicator() {
   return (
@@ -25,19 +37,53 @@ function TypingIndicator() {
   );
 }
 
+// ── Collapsible Thinking block ────────────────────────────────────────────────
+function ThinkingBlock({ thinking }: { thinking: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-muted-foreground/40 text-xs hover:text-muted-foreground/70 transition-colors"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 12 12"
+          fill="none"
+          className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+        >
+          <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <span>{open ? "Hide" : "Show"} reasoning</span>
+      </button>
+      {open && (
+        <div
+          className="mt-1.5 px-3 py-2 rounded-lg text-xs text-muted-foreground/50 leading-relaxed whitespace-pre-wrap border border-white/[0.05]"
+          style={{
+            background: "rgba(255,255,255,0.02)",
+            animation: "fade-in 0.2s ease-out",
+          }}
+        >
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Markdown-lite renderer: bold, bullet lists ────────────────────────────────
 function MessageContent({ text }: { text: string }) {
-  // Split by newlines, render simple markdown
   const lines = text.split("\n");
   return (
     <div className="space-y-1">
       {lines.map((line, i) => {
-        // Bold: **text**
         const parts = line.split(/\*\*(.*?)\*\*/g);
         const rendered = parts.map((part, j) =>
           j % 2 === 1 ? <strong key={j} className="font-semibold text-foreground">{part}</strong> : part
         );
-        // Bullet
         if (line.startsWith("- ") || line.startsWith("• ")) {
           return (
             <div key={i} className="flex gap-2">
@@ -46,7 +92,6 @@ function MessageContent({ text }: { text: string }) {
             </div>
           );
         }
-        // Numbered list
         if (/^\d+\.\s/.test(line)) {
           const num = line.match(/^(\d+)\.\s/)?.[1];
           const rest = line.replace(/^\d+\.\s/, "");
@@ -67,10 +112,16 @@ function MessageContent({ text }: { text: string }) {
   );
 }
 
+// ── Extended message type with thinking field ─────────────────────────────────
+interface RichChatMessage extends AppChatMessage {
+  thinking?: string;
+  modelUsed?: string;
+}
+
 export function AssistantPage() {
   const { set }                   = useTopbar();
   const { user }                  = useAuth();
-  const [messages, setMessages]   = useState<AppChatMessage[]>([]);
+  const [messages, setMessages]   = useState<RichChatMessage[]>([]);
   const [input, setInput]         = useState("");
   const [typing, setTyping]       = useState(false);
   const [imageFile, setImageFile] = useState<{ base64: string; type: string } | null>(null);
@@ -102,7 +153,7 @@ export function AssistantPage() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
-    const userMsg: AppChatMessage = {
+    const userMsg: RichChatMessage = {
       id:        crypto.randomUUID(),
       role:      "user",
       content:   text,
@@ -110,51 +161,66 @@ export function AssistantPage() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setImageFile(null);
-    setTyping(true);
-
-    try {
-      // Build API history (last 10 turns for context window)
-      const history: ApiChatMsg[] = messages.slice(-10).map((m) => ({
+    // ── CRITICAL FIX: capture messages BEFORE state update, build history from it ──
+    // Using the functional updater pattern ensures we read latest state.
+    // We add the user message and immediately derive history from the same snapshot.
+    setMessages((prev) => {
+      // Build API history from previous messages (max 10 turns for context window)
+      // This is the correct place to read prev — not in the outer closure
+      const history: ApiChatMsg[] = prev.slice(-10).map((m) => ({
         role:    m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      const resp = await sendChatMessage(
-        {
-          message:      text,
-          history,
-          image_base64: imgData?.base64,
-          language:     "en",
-          session_id:   sessionIdRef.current,
-        },
-        abortRef.current.signal,
-      );
+      // Fire the async request — we capture history here inside the closure
+      // where prev is accurate and includes all messages so far
+      void (async () => {
+        setInput("");
+        setImageFile(null);
+        setTyping(true);
 
-      sessionIdRef.current = resp.session_id;
+        try {
+          const resp = await sendChatMessage(
+            {
+              message:      text,
+              history,      // ← correct history at time of send
+              image_base64: imgData?.base64,
+              language:     "en",
+              session_id:   sessionIdRef.current,
+            },
+            abortRef.current!.signal,
+          );
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id:        crypto.randomUUID(),
-          role:      "assistant",
-          content:   resp.message,
-          timestamp: new Date(),
-          modelUsed: resp.model_used,
-        },
-      ]);
-    } catch (err: unknown) {
-      if ((err as { name?: string })?.name === "AbortError") return;
-      const msg = err instanceof ApiError
-        ? `AI unavailable (${err.status}). Backend may be starting up — try again in 30s.`
-        : "Failed to reach AI assistant. Check connection.";
-      toast.error(msg);
-    } finally {
-      setTyping(false);
-    }
-  }, [messages]);
+          sessionIdRef.current = resp.session_id;
+
+          // Strip <think>...</think> reasoning from response
+          const { thinking, content } = extractThinkingAndContent(resp.message);
+
+          setMessages((p) => [
+            ...p,
+            {
+              id:        crypto.randomUUID(),
+              role:      "assistant",
+              content:   content || resp.message,
+              thinking:  thinking || undefined,
+              timestamp: new Date(),
+              modelUsed: resp.model_used,
+            },
+          ]);
+        } catch (err: unknown) {
+          if ((err as { name?: string })?.name === "AbortError") return;
+          const msg = err instanceof ApiError
+            ? `AI unavailable (${err.status}). Backend may be starting up — try again in 30s.`
+            : "Failed to reach AI assistant. Check connection.";
+          toast.error(msg);
+        } finally {
+          setTyping(false);
+        }
+      })();
+
+      return [...prev, userMsg];
+    });
+  }, []); // ← empty deps: sendMessage doesn't close over messages anymore
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -182,8 +248,6 @@ export function AssistantPage() {
   };
 
   return (
-    // Full-height flex column that fills the content area edge-to-edge
-    // Negative margins cancel out AppLayout's p-4 md:p-8 padding
     <div
       className="flex flex-col -m-4 md:-m-8"
       style={{ height: "calc(100vh - 56px)" }}
@@ -252,6 +316,10 @@ export function AssistantPage() {
                       className="max-h-40 rounded-lg mb-2 object-cover"
                     />
                   )}
+                  {/* Show collapsible thinking block for assistant messages */}
+                  {msg.role === "assistant" && msg.thinking && (
+                    <ThinkingBlock thinking={msg.thinking} />
+                  )}
                   {msg.role === "assistant" ? (
                     <MessageContent text={msg.content} />
                   ) : (
@@ -262,9 +330,9 @@ export function AssistantPage() {
                   <p className="text-[10px] text-muted-foreground/30">
                     {msg.timestamp.toLocaleTimeString("en-US", { hour12: true })}
                   </p>
-                  {msg.role === "assistant" && (msg as AppChatMessage & { modelUsed?: string }).modelUsed && (
+                  {msg.role === "assistant" && msg.modelUsed && (
                     <p className="text-[10px] text-muted-foreground/20">
-                      · {(msg as AppChatMessage & { modelUsed?: string }).modelUsed}
+                      · {msg.modelUsed}
                     </p>
                   )}
                 </div>
@@ -322,7 +390,6 @@ export function AssistantPage() {
             value={input}
             onChange={(e) => {
               setInput(e.target.value);
-              // Auto-grow (max 3 rows)
               e.target.style.height = "auto";
               e.target.style.height = Math.min(e.target.scrollHeight, 96) + "px";
             }}

@@ -17,15 +17,25 @@
   --secondary-foreground: 0 0% 96%;
   --muted:                0 0% 16%;
   --muted-foreground:     0 0% 60%;
-  --accent:               119 99% 46%;
-  --accent-foreground:    0 0% 4%;
+  --accent:               0 0% 22%;
+  --accent-foreground:    0 0% 96%;
+  /* popover — used by ALL Radix dropdowns, selects, tooltips */
+  --popover:              0 0% 13%;
+  --popover-foreground:   0 0% 93%;
+  /* card */
+  --card:                 0 0% 12%;
+  --card-foreground:      0 0% 96%;
+  /* input background — used by shadcn input, select, textarea, checkbox */
+  --input-background:     0 0% 9%;
   --destructive:          0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
   --border:               0 0% 20%;
   --input:                0 0% 20%;
   --ring:                 119 99% 46%;
   --radius:               0.5rem;
   --nav-button:           0 0% 18%;
   --hero-bg:              0 0% 8%;
+  --sidebar:              0 0% 9%;
   --topbar-height:        56px;
   --sidebar-width:        240px;
 }
@@ -44,12 +54,19 @@
   --color-muted-foreground:     hsl(var(--muted-foreground));
   --color-accent:               hsl(var(--accent));
   --color-accent-foreground:    hsl(var(--accent-foreground));
+  --color-popover:              hsl(var(--popover));
+  --color-popover-foreground:   hsl(var(--popover-foreground));
+  --color-card:                 hsl(var(--card));
+  --color-card-foreground:      hsl(var(--card-foreground));
+  --color-input-background:     hsl(var(--input-background));
   --color-destructive:          hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
   --color-border:               hsl(var(--border));
   --color-input:                hsl(var(--input));
   --color-ring:                 hsl(var(--ring));
   --color-nav-button:           hsl(var(--nav-button));
   --color-hero-bg:              hsl(var(--hero-bg));
+  --color-sidebar:              hsl(var(--sidebar));
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);

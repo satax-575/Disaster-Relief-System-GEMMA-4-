@@ -9,7 +9,6 @@ import {
 } from "../components/shared/index";
 import { FormInput } from "../components/shared/index";
 import type { TriageAssessmentResult } from "../../lib/types";
-import { getTriageGuidance, ApiError } from "../../lib/api";
 
 const PRESET_SYMPTOMS = [
   "Not breathing","Severe bleeding","Unconscious","Chest pain",
@@ -81,6 +80,8 @@ export function TriagePage() {
   const [gender, setGender]       = useState("Unknown");
   const [result, setResult]       = useState<ExtendedTriageResult | null>(null);
   const [loading, setLoading]     = useState(false);
+  const [loadingStage, setLoadingStage] = useState("");
+  const [loadingProgress, setLoadingProgress] = useState(0);
   const abortRef                  = useRef<AbortController | null>(null);
 
   const topbarRight = useMemo(() => (
@@ -118,21 +119,76 @@ export function TriagePage() {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setLoading(true);
+    setLoadingStage("Analyzing symptoms with Gemma 4...");
+    setLoadingProgress(20);
     setResult(null);
+
+    const BACKEND = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8000";
+
     try {
-      const raw = await getTriageGuidance(
-        { symptoms: selectedArr, age_estimate: age, gender, language: "en" },
-        abortRef.current.signal,
-      );
-      setResult(normaliseTriageResult(raw as unknown as Record<string, unknown>));
+      const res = await fetch(`${BACKEND}/api/v1/triage/guidance/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symptoms: selectedArr, age_estimate: age, gender, language: "en" }),
+        signal: abortRef.current.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+
+        for (const block of lines) {
+          const eventMatch = block.match(/^event:\s*(\S+)/m);
+          const dataMatch  = block.match(/^data:\s*(.+)/m);
+          if (!eventMatch || !dataMatch) continue;
+
+          const event = eventMatch[1];
+          const data  = JSON.parse(dataMatch[1]);
+
+          if (event === "analyzing" || event === "processing") {
+            setLoadingStage(data.stage);
+            setLoadingProgress(data.progress);
+          } else if (event === "complete") {
+            setResult(normaliseTriageResult(data.result as Record<string, unknown>));
+            setLoadingProgress(100);
+          } else if (event === "error") {
+            throw new Error(data.message);
+          }
+        }
+      }
     } catch (err: unknown) {
       if ((err as { name?: string })?.name === "AbortError") return;
-      const msg = err instanceof ApiError
-        ? `Triage failed (${err.status}). Backend may be starting — try again.`
-        : "Triage assessment failed.";
-      toast.error(msg);
+      // SSE failed — fall back to regular POST
+      try {
+        const { getTriageGuidance, ApiError } = await import("../../lib/api");
+        const raw = await getTriageGuidance(
+          { symptoms: selectedArr, age_estimate: age, gender, language: "en" },
+          abortRef.current?.signal,
+        );
+        setResult(normaliseTriageResult(raw as unknown as Record<string, unknown>));
+      } catch (fallbackErr: unknown) {
+        if ((fallbackErr as { name?: string })?.name === "AbortError") return;
+        const msg = fallbackErr instanceof Error
+          ? `Triage failed. ${fallbackErr.message}`
+          : "Triage assessment failed.";
+        toast.error(msg);
+      }
     } finally {
       setLoading(false);
+      setLoadingStage("");
+      setLoadingProgress(0);
     }
   };
 
@@ -234,8 +290,17 @@ export function TriagePage() {
           )}
           {loading && (
             <div className="py-12 flex flex-col items-center gap-4">
+              {/* Progress bar */}
+              <div className="w-full max-w-[200px] h-1 bg-white/[0.06] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-700"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
               <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <p className="text-muted-foreground/40 text-sm">Gemma 4 31B analyzing…</p>
+              <p className="text-muted-foreground/40 text-sm text-center">
+                {loadingStage || "Gemma 4 31B analyzing…"}
+              </p>
             </div>
           )}
           {result && (

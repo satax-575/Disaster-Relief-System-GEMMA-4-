@@ -28,13 +28,21 @@ class AdvancedAIEngine:
             for m in history[-4:]
         )
         prompt = (
-            f"You are RAKSHA AI, a Gemma 4-powered emergency response assistant.\n"
-            f"If the user needs real-world action, output a JSON function_call block.\n"
+            f"You are RAKSHA AI, a Gemma 4-powered emergency response intelligence system deployed in active disaster zones.\n"
+            f"RESPONSE REQUIREMENTS (NON-NEGOTIABLE):\n"
+            f"1. Always give specific, actionable, situation-aware answers — never generic or vague.\n"
+            f"2. If the user provides an incident ID, location, or hazard type, tailor the response to that specific context.\n"
+            f"3. Use structured formatting: bullet points, priority levels, recommended actions, and estimated timelines where relevant.\n"
+            f"4. Dynamically generate based on conversation history and current input. NEVER repeat a canned response.\n"
+            f"5. If the user needs real-world action (dispatch, alert, etc), output a JSON function_call block.\n"
             f"Respond ONLY in language: {language}.\n\n"
-            f"{context}\nUser: {message}\nRAKSHA AI:"
+            f"--- CONVERSATION HISTORY ---\n"
+            f"{context}\n\n"
+            f"User: {message}\n"
+            f"RAKSHA AI:"
         )
 
-        # 1. Gemma 4 via Google AI REST (highest quality cascade)
+        # 1. Gemma 4 via Google AI REST (highest quality cascade without tools)
         if config.google_api_key:
             try:
                 body = {
@@ -56,46 +64,53 @@ class AdvancedAIEngine:
             except Exception as e:
                 logger.warning(f"Cascade Gemma 4 cloud failed: {e}")
 
-        # 2. Pollinations free LLM (no API key, uses Mistral model)
-        try:
-            encoded = urllib.parse.quote(prompt[: config.pollinations_max_chars])
-            async with httpx.AsyncClient(timeout=config.pollinations_timeout_s) as client:
-                r = await client.get(
-                    f"{config.pollinations_base_url}{encoded}?model={config.pollinations_model}",
-                    headers={"User-Agent": "RakshaAI/2.0"},
-                )
-                if r.status_code == 200 and len(r.text.strip()) > 10:
-                    return r.text.strip()
-        except Exception as e:
-            logger.warning(f"Pollinations cascade failed: {e}")
+        # 2. Groq Fallback (as provided)
+        if config.groq_api_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {config.groq_api_key}",
+                    "Content-Type": "application/json"
+                }
+                body = {
+                    "model": config.groq_vision_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.5,
+                    "max_tokens": 1024
+                }
+                async with httpx.AsyncClient(timeout=15) as client:
+                    r = await client.post(config.groq_endpoint, headers=headers, json=body)
+                    if r.status_code == 200:
+                        text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if text:
+                            return text + "\n\n*(Fallback: Groq)*"
+            except Exception as e:
+                logger.warning(f"Groq cascade failed: {e}")
 
-        # 3. DuckDuckGo HTML search (factual last resort)
-        try:
-            query = urllib.parse.quote(message[:200])
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.get(
-                    f"https://html.duckduckgo.com/html/?q={query}",
-                    headers={"User-Agent": "Mozilla/5.0"},
-                )
-                if r.status_code == 200:
-                    import re
-                    snippets = re.findall(
-                        r'<a class="result__snippet[^>]*>(.*?)</a>',
-                        r.text, re.IGNORECASE | re.DOTALL,
-                    )
-                    if snippets:
-                        clean = re.sub(r"<[^>]+>", "", snippets[0]).strip()
-                        clean = (clean.replace("&#x27;", "'")
-                                      .replace("&quot;", '"')
-                                      .replace("&amp;", "&"))
-                        if len(clean) > 20:
-                            return f"{clean}\n\n*(Web search — Gemma 4 temporarily offline)*"
-        except Exception as e:
-            logger.warning(f"DDG cascade failed: {e}")
+        # 3. Mistral Fallback (as provided)
+        if config.mistral_api_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {config.mistral_api_key}",
+                    "Content-Type": "application/json"
+                }
+                body = {
+                    "model": config.mistral_vision_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.5,
+                    "max_tokens": 1024
+                }
+                async with httpx.AsyncClient(timeout=15) as client:
+                    r = await client.post(config.mistral_endpoint, headers=headers, json=body)
+                    if r.status_code == 200:
+                        text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if text:
+                            return text + "\n\n*(Fallback: Mistral)*"
+            except Exception as e:
+                logger.warning(f"Mistral cascade failed: {e}")
 
         # 4. Static offline emergency protocols (never fails)
         return (
-            "⚠️ AI Emergency Mode Active\n\n"
+            "⚠️ RAKSHA AI Emergency Mode Active\n\n"
             "All AI providers unreachable. Emergency protocols:\n"
             "• India Emergency: 112\n• NDRF: 1078\n• Medical: 108\n• Fire: 101\n\n"
             "Standard safety protocols:\n"

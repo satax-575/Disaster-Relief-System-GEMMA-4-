@@ -38,7 +38,7 @@ export default defineConfig({
           ],
 
           // Leaflet map — medium, infrequently updated
-          "vendor-leaflet": ["leaflet", "react-leaflet"],
+          "vendor-leaflet": ["leaflet"],
 
           // Charts
           "vendor-recharts": ["recharts"],
@@ -66,7 +66,6 @@ export default defineConfig({
       "firebase/auth",
       "firebase/firestore",
       "leaflet",
-      "react-leaflet",
       "recharts",
     ],
   },

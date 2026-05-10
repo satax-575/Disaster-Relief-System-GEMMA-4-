@@ -14,6 +14,7 @@ import {
   useCallback,
   useRef,
   useEffect,
+  memo,
   type ReactNode,
 } from "react";
 
@@ -39,50 +40,24 @@ const NAV = [
 
 const AI_MODEL = (import.meta.env.VITE_AI_MODEL_NAME as string | undefined) ?? "Gemma 4 31B";
 
-// ── AppLayout ─────────────────────────────────────────────────────────────────
-export function AppLayout() {
-  const { user, signOut }       = useAuth();
-  const { data: incidents }     = useIncidents();
-  const { data: alerts }        = useAlerts();
-  const activeIncidentCount     = incidents.filter((i) => i.status === "active").length;
-  const activeAlertCount        = alerts.filter((a) => a.status === "active").length;
-  const [topbar, setTopbar]     = useState<TopbarCtx>({ title: "RAKSHAK AI" });
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const navigate    = useNavigate();
-  const location    = useLocation();
-  const mainRef     = useRef<HTMLDivElement>(null);
-
-  // Stable context value — avoids re-rendering every consumer on every render
-  const setTopbarStable = useCallback((v: TopbarCtx) => setTopbar(v), []);
-  const ctxValue = useMemo(() => ({ set: setTopbarStable }), [setTopbarStable]);
-
-  // Close sidebar on route change (mobile)
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [location.pathname]);
-
-  // Close sidebar on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSidebarOpen(false);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, []);
-
-  // Lock body scroll when mobile sidebar is open
-  useEffect(() => {
-    document.body.style.overflow = sidebarOpen ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [sidebarOpen]);
-
+// ── SidebarContent — extracted as memo to avoid re-creation on every AppLayout render ──
+const SidebarContent = memo(function SidebarContent({
+  user, signOut, navigate,
+  activeIncidentCount, activeAlertCount,
+}: {
+  user: ReturnType<typeof useAuth>["user"];
+  signOut: () => Promise<void>;
+  navigate: (to: string) => void;
+  activeIncidentCount: number;
+  activeAlertCount: number;
+}) {
   const getBadgeCount = (badge?: "incidents" | "alerts") => {
     if (badge === "incidents") return activeIncidentCount;
     if (badge === "alerts")    return activeAlertCount;
     return 0;
   };
 
-  const SidebarContent = () => (
+  return (
     <>
       {/* Wordmark + model status */}
       <div className="px-6 pt-6 pb-8">
@@ -93,9 +68,7 @@ export function AppLayout() {
           RAKSHAK<span className="text-primary">AI</span>
         </button>
         <div className="mt-2 flex items-center gap-1.5">
-          <span
-            className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 animate-pulse"
-          />
+          <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0 animate-pulse" />
           <span className="text-muted-foreground/60 text-[11px] font-light truncate">
             {AI_MODEL}
           </span>
@@ -159,6 +132,50 @@ export function AppLayout() {
       </div>
     </>
   );
+});
+
+// ── AppLayout ─────────────────────────────────────────────────────────────────
+export function AppLayout() {
+  const { user, signOut }       = useAuth();
+  const { data: incidents }     = useIncidents();
+  const { data: alerts }        = useAlerts();
+  const activeIncidentCount     = incidents.filter((i) => i.status === "active").length;
+  const activeAlertCount        = alerts.filter((a) => a.status === "active").length;
+  const [topbar, setTopbar]     = useState<TopbarCtx>({ title: "RAKSHAK AI" });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const navigate    = useNavigate();
+  const location    = useLocation();
+  const mainRef     = useRef<HTMLDivElement>(null);
+
+  // Stable context value — avoids re-rendering every consumer on every render
+  const setTopbarStable = useCallback((v: TopbarCtx) => setTopbar(v), []);
+  const ctxValue = useMemo(() => ({ set: setTopbarStable }), [setTopbarStable]);
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
+
+  // Close sidebar on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
+
+  // Lock body scroll when mobile sidebar is open
+  useEffect(() => {
+    document.body.style.overflow = sidebarOpen ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [sidebarOpen]);
+
+  const getBadgeCount = (badge?: "incidents" | "alerts") => {
+    if (badge === "incidents") return activeIncidentCount;
+    if (badge === "alerts")    return activeAlertCount;
+    return 0;
+  };
 
   return (
     <TopbarContext.Provider value={ctxValue}>
@@ -173,7 +190,13 @@ export function AppLayout() {
             backdropFilter: "blur(8px)",
           }}
         >
-          <SidebarContent />
+          <SidebarContent
+            user={user}
+            signOut={signOut}
+            navigate={navigate}
+            activeIncidentCount={activeIncidentCount}
+            activeAlertCount={activeAlertCount}
+          />
         </aside>
 
         {/* ── Mobile Sidebar Overlay ────────────────────────────────── */}
@@ -197,7 +220,13 @@ export function AppLayout() {
           }}
           aria-label="Navigation menu"
         >
-          <SidebarContent />
+          <SidebarContent
+            user={user}
+            signOut={signOut}
+            navigate={navigate}
+            activeIncidentCount={activeIncidentCount}
+            activeAlertCount={activeAlertCount}
+          />
         </aside>
 
         {/* ── Main area ─────────────────────────────────────────────── */}
