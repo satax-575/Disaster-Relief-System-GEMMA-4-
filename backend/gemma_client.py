@@ -519,6 +519,7 @@ class GemmaClient:
         # Strip <think>...</think> blocks — internal reasoning should never reach the user
         msg = re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_msg, flags=re.IGNORECASE)
         # Forcefully strip leaked JSON function blocks from the text
+        msg = re.sub(r"(?i)JSON Function Call:\s*(```json)?\s*\{[\s\S]*?\}\s*(```)?", "", msg)
         msg = re.sub(r"```json\s*\{[\s\S]*?\}\s*```", "", msg, flags=re.IGNORECASE)
         msg = re.sub(r"JSON Function Call:[\s\S]*?\}", "", msg, flags=re.IGNORECASE).strip()
         if not msg:
@@ -573,15 +574,10 @@ class GemmaClient:
         text = await _get_advanced_ai().generate_response(message, history, language)
 
         fc_list, fr_list = [], []
-        m = re.search(r'```json\s*(\{.*?"function_call".*?\})\s*```', text, re.DOTALL)
-        if m:
-            try:
-                fc_data = json.loads(m.group(1)).get("function_call", {})
-                if fc_data.get("name"):
-                    fc_list.append({"name": fc_data["name"], "args": fc_data.get("arguments", {})})
-                    text = text.replace(m.group(0), "").strip()
-            except Exception:
-                pass
+        
+        # Strip all function call json artifacts from text
+        text = re.sub(r"(?i)JSON Function Call:\s*(```json)?\s*\{[\s\S]*?\}\s*(```)?", "", text)
+        text = re.sub(r"```json\s*\{[\s\S]*?\}\s*```", "", text, flags=re.IGNORECASE).strip()
 
         for fc in fc_list:
             fr_list.append({"name": fc["name"], "result": self._execute_tool(fc["name"], fc["args"])})
