@@ -408,7 +408,7 @@ async def chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
 
     # Load session history if exists
-    history = [h.model_dump() for h in request.history]
+    history = [h.model_dump(mode='json') for h in request.history]
     if not history and request.session_id:
         session = await db.get_chat_session(request.session_id)
         if session:

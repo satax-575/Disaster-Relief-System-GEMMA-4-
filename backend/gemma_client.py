@@ -453,14 +453,19 @@ class GemmaClient:
 
         # Gemma models do not support systemInstruction natively on some endpoints.
         # We inject the system prompt into the first message to guarantee it works.
-        if is_gemma and not history:
-            parts.insert(0, {"text": f"[SYSTEM INSTRUCTION]\n{sys_prompt}\n\n[USER INPUT]\n"})
-
         contents = []
         for h in history[-10:]:
             role = "user" if h.get("role") == "user" else "model"
             contents.append({"role": role, "parts": [{"text": h.get("content", "")}]})
         contents.append({"role": "user", "parts": parts})
+
+        if is_gemma:
+            sys_msg = f"[SYSTEM INSTRUCTION]\n{sys_prompt}\n\n[USER INPUT]\n"
+            # Ensure the first message (which must be 'user') has the system instructions prepended
+            if contents[0]["role"] == "user":
+                contents[0]["parts"][0]["text"] = sys_msg + contents[0]["parts"][0]["text"]
+            else:
+                contents.insert(0, {"role": "user", "parts": [{"text": sys_msg}]})
 
         body: Dict = {
             "contents": contents,
