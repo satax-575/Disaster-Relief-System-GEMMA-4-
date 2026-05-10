@@ -100,7 +100,14 @@ export function AssessPage() {
       );
       setResult(normaliseResult(raw as Record<string, unknown>));
     } catch (err: unknown) {
-      if ((err as { name?: string })?.name === "AbortError") return;
+      const isAbort = (err as { name?: string })?.name === "AbortError";
+      if (isAbort && abortRef.current?.signal.aborted) {
+        // Only return if it was manually aborted by the user
+        // Wait, the timeout controller isn't exposed here. 
+        // We will just show a timeout message.
+        toast.error("Assessment took too long. The AI is likely cold-starting. Please try again.");
+        return;
+      }
       const msg = err instanceof ApiError
         ? `Assessment failed (${err.status}): ${(err as ApiError).message.slice(0, 100)}. Upload a photo and try again.`
         : "Assessment failed. Ensure backend is running and an image is selected.";

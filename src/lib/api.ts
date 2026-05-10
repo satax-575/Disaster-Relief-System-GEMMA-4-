@@ -12,7 +12,7 @@ async function apiFetch<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), 60_000); // 60s default timeout
+  const id = setTimeout(() => controller.abort(), 120_000); // 120s default timeout (handles slow LLMs)
 
   // Merge supplied signal with our timeout signal
   const mergedSignal = signal

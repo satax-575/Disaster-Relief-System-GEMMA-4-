@@ -313,9 +313,9 @@ class GemmaClient:
                 context += f"Building type: {building_type}. "
 
             # Gemma 4 is a text-to-text model. Sending raw images to the Google API causes 
-            # a 500 Internal Server Error. We extract a caption using BLIP first.
-            caption = await _get_vision_agent()._get_blip_caption(image_base64)
-            logger.info(f"Generated BLIP caption for Gemma 4 assessment: {caption}")
+            # a 500 Internal Server Error. We extract a caption using Groq/Mistral/BLIP first.
+            caption = await _get_vision_agent()._get_image_caption(image_base64)
+            logger.info(f"Generated caption for Gemma 4 assessment: {caption}")
 
             prompt = (
                 f"You are a disaster assessment AI. Analyze this disaster scene description: '{caption}'.\n"
@@ -517,7 +517,10 @@ class GemmaClient:
 
         raw_msg = "\n".join(text_parts) if text_parts else self._summarize_results(fr_list)
         # Strip <think>...</think> blocks — internal reasoning should never reach the user
-        msg = re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_msg, flags=re.IGNORECASE).strip()
+        msg = re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_msg, flags=re.IGNORECASE)
+        # Forcefully strip leaked JSON function blocks from the text
+        msg = re.sub(r"```json\s*\{[\s\S]*?\}\s*```", "", msg, flags=re.IGNORECASE)
+        msg = re.sub(r"JSON Function Call:[\s\S]*?\}", "", msg, flags=re.IGNORECASE).strip()
         if not msg:
             msg = raw_msg.strip()  # fallback if everything was thinking
         return {"message": msg, "model_used": config.gemma_cloud_model,

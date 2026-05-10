@@ -28,7 +28,7 @@ class VisionAgent:
     async def analyze_incident_image(self, image_base64: str, language: str = "en") -> Dict[str, Any]:
         """Full pipeline: BLIP caption → Gemma 4 LLM structuring → JSON report."""
         try:
-            caption = await self._get_blip_caption(image_base64)
+            caption = await self._get_image_caption(image_base64)
             logger.info(f"BLIP caption: {caption}")
 
             prompt = (
@@ -62,29 +62,97 @@ class VisionAgent:
     # Alias for backward compatibility
     analyze = analyze_incident_image
 
-    async def _get_blip_caption(self, image_base64: str) -> str:
-        """Zero-cost image captioning via HuggingFace BLIP inference API."""
-        headers = {}
-        if config.huggingface_token:
-            headers["Authorization"] = f"Bearer {config.huggingface_token}"
-
+    async def _get_image_caption(self, image_base64: str) -> str:
+        """Zero-cost image captioning via Groq/Mistral/BLIP inference APIs."""
         raw_b64 = image_base64.split(",")[-1] if "," in image_base64 else image_base64
+        
+        prompt = "Describe this disaster scene concisely, focusing on structural damage, hazards, and people trapped. Be objective."
+
+        # 1. Try Groq (Llama 4 Vision)
+        if config.groq_api_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {config.groq_api_key}",
+                    "Content-Type": "application/json"
+                }
+                body = {
+                    "model": config.groq_vision_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpeg;base64,{raw_b64}"}
+                                }
+                            ]
+                        }
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 300
+                }
+                async with httpx.AsyncClient(timeout=20) as client:
+                    r = await client.post(config.groq_endpoint, headers=headers, json=body)
+                    if r.status_code == 200:
+                        text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if text:
+                            logger.info("Generated image caption via Groq Vision")
+                            return text.strip()
+            except Exception as e:
+                logger.warning(f"Groq Vision failed: {e}")
+
+        # 2. Try Mistral (Pixtral)
+        if config.mistral_api_key:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {config.mistral_api_key}",
+                    "Content-Type": "application/json"
+                }
+                body = {
+                    "model": config.mistral_vision_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": f"data:image/jpeg;base64,{raw_b64}"
+                                }
+                            ]
+                        }
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 300
+                }
+                async with httpx.AsyncClient(timeout=20) as client:
+                    r = await client.post(config.mistral_endpoint, headers=headers, json=body)
+                    if r.status_code == 200:
+                        text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if text:
+                            logger.info("Generated image caption via Mistral Vision")
+                            return text.strip()
+            except Exception as e:
+                logger.warning(f"Mistral Vision failed: {e}")
+
+        # 3. Fallback to BLIP
         try:
             image_data = base64.b64decode(raw_b64)
-        except Exception:
-            return "Disaster scene (image decode failed)"
-
-        try:
+            headers = {}
+            if config.huggingface_token:
+                headers["Authorization"] = f"Bearer {config.huggingface_token}"
             async with httpx.AsyncClient(timeout=30) as client:
                 r = await client.post(config.blip_api_url, headers=headers, content=image_data)
                 if r.status_code == 200:
                     result = r.json()
                     if isinstance(result, list) and result:
+                        logger.info("Generated image caption via BLIP")
                         return result[0].get("generated_text", "Disaster area with visible damage.")
-            return "Disaster scene with potential structural damage."
         except Exception as e:
             logger.warning(f"BLIP API failed: {e}")
-            return "Image analysis unavailable (offline mode)."
+            
+        return "Disaster scene with potential structural damage."
 
     def _parse_json(self, text: str) -> Optional[Dict]:
         if not text:

@@ -82,7 +82,7 @@ class AdvancedAIEngine:
                     if r.status_code == 200:
                         text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                         if text:
-                            return text + "\n\n*(Fallback: Groq)*"
+                            return text
             except Exception as e:
                 logger.warning(f"Groq cascade failed: {e}")
 
@@ -104,7 +104,7 @@ class AdvancedAIEngine:
                     if r.status_code == 200:
                         text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                         if text:
-                            return text + "\n\n*(Fallback: Mistral)*"
+                            return text
             except Exception as e:
                 logger.warning(f"Mistral cascade failed: {e}")
 

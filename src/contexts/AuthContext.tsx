@@ -55,18 +55,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       queueMicrotask(() => {
         setUser(firebaseUser);
         setLoading(false);
-
-        // Only navigate to dashboard when the user explicitly signed in
-        // (not on the initial page-load hydration). This prevents a navigation
-        // conflict when AuthPage is rendering and onAuthStateChanged fires for
-        // a persisted session.
-        if (!isInitial && firebaseUser && wasSigningIn) {
-          signingInRef.current = false;
-          navigate("/app/dashboard", { replace: true });
-        }
-        if (!isInitial && !firebaseUser) {
-          signingInRef.current = false;
-        }
       });
     });
     return unsubscribe;
@@ -98,8 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { merge: true }
       );
 
-      // Navigation is handled by the onAuthStateChanged callback above.
-      // That fires AFTER React has finished rendering, so state is settled.
+      navigate("/app/dashboard", { replace: true });
     } catch (err) {
       console.error("[RAKSHAK] Google sign-in failed:", err);
       signingInRef.current = false;
