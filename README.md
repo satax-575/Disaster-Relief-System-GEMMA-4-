@@ -1,253 +1,218 @@
-# 🛡️ RAKSHA AI — Offline-First Disaster Intelligence
-### Powered by Gemma 4 & Ollama
+# RAKSHA AI
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-Render-brightgreen)](https://gemma-hackathon.onrender.com/)
-[![Track](https://img.shields.io/badge/Track-Global_Resilience-blue)](#)
-[![Tech](https://img.shields.io/badge/Tech-Gemma_4-orange)](#)
+AI-Powered Disaster Intelligence System
 
-**RAKSHA** (Sanskrit for "Protection") is a production-grade, mission-critical disaster response platform. It provides field responders with AI-grade intelligence — multimodal damage assessment, medical triage, and autonomous coordination — even when the internet has completely failed.
+## Overview
 
----
+RAKSHA AI is a disaster response platform powered by Gemma 4 31B that provides emergency responders with AI intelligence during natural disasters and mass casualty incidents. The system delivers real-time damage assessment, medical triage guidance, and autonomous incident coordination.
 
-## 🚀 Live Deployment
-👉 **[https://gemma-hackathon.onrender.com/](https://gemma-hackathon.onrender.com/)**
+## Key Features
 
----
+- **Multimodal Damage Assessment**: Analyzes disaster photos to identify structural damage, hazards, trapped persons, and resource requirements using HuggingFace BLIP vision and Gemma 4 31B analysis.
 
-## ✨ Key Innovations
+- **AI-Guided Medical Triage**: Implements START protocol with real-time AI reasoning. Provides Red/Yellow/Green/Black classification and clinical recommendations for field medics.
 
-### 1. 🤖 Dual-Mode Gemma 4 Intelligence
-- **Cloud**: Gemma 4 31B (`gemma-4-31b-it`) via Google AI API — when online
-- **Local**: Any Ollama model (gemma2:9b, mistral, llama) — when offline
-- Automatic, transparent switching with 3-retry exponential backoff
-- Graceful degradation to Pollinations cascade if both fail
+- **Autonomous Coordination**: Background agent monitors critical incidents and automatically dispatches responder teams using Gemma 4 function calling.
 
-### 2. 👁️ Zero-Cost Multimodal Vision Pipeline
-Analyzes disaster footage to identify structural damage, trapped persons, and hazards using HuggingFace BLIP + LLM cascade — no GPU infrastructure required.
+- **Offline Operation**: Progressive Web App with service worker caching, SQLite persistence, and local Ollama model support for zero-connectivity scenarios.
 
-### 3. 🏥 AI-Guided Medical Triage
-Guides untrained volunteers through START Triage Protocol with real-time AI reasoning (Red/Yellow/Green/Black priority assignment).
+- **Multilingual**: Supports 10+ languages including Hindi, Tamil, Telugu, Bengali, Marathi, Arabic, Swahili, Spanish, and French.
 
-### 4. 🤖 Autonomous Overwatch Agent
-Background AI commander that monitors critical unassigned incidents and automatically dispatches responders using native function calling.
+## Technical Stack
 
-### 5. 🌐 Multilingual & Offline-First PWA
-- Installable on any smartphone with full offline UI caching
-- 10+ languages: Hindi, Tamil, Bengali, Telugu, Marathi, Arabic, Swahili, Spanish, French
+**Backend**: FastAPI, SQLite with WAL mode, WebSocket, Pydantic, aiosqlite
 
----
+**AI Models**: 
+- Primary: Gemma 4 31B (Google AI API)
+- Offline: Local models via Ollama (gemma2, llama, mistral)
+- Vision: HuggingFace BLIP, Groq Llama 4 Scout, Mistral Pixtral
 
-## 🛠️ Technical Architecture
+**Frontend**: Vanilla JavaScript, Leaflet.js maps, Service Worker, PWA
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     RAKSHA AI Architecture                   │
-├─────────────────┬───────────────────────────────────────────┤
-│  Frontend       │  Vanilla JS + CSS Glassmorphism            │
-│  (PWA/SPA)      │  Service Worker for offline caching        │
-├─────────────────┼───────────────────────────────────────────┤
-│  Backend        │  FastAPI (Python 3.11) + aiosqlite        │
-│                 │  WebSocket real-time updates               │
-├─────────────────┼───────────────────────────────────────────┤
-│  AI (Cloud)     │  Gemma 4 (gemma-4-31b-it) via Google AI    │
-│  AI (Local)     │  Ollama: gemma2, mistral, llama           │
-│  AI (Cascade)   │  Pollinations → DuckDuckGo → Static       │
-├─────────────────┼───────────────────────────────────────────┤
-│  Vision         │  HuggingFace BLIP → LLM analysis          │
-│  RAG            │  In-memory medical protocol retrieval      │
-│  Database       │  SQLite WAL-mode (offline sync queue)      │
-└─────────────────┴───────────────────────────────────────────┘
-```
+**Deployment**: Docker, uvicorn ASGI server
 
----
-
-## 📋 Setup & Run Instructions
+## Quick Start
 
 ### Prerequisites
 - Python 3.11+
-- (Optional) [Ollama](https://ollama.com) for local offline AI
-- (Optional) [Google AI API Key](https://aistudio.google.com/app/apikey) for cloud Gemma 4
+- Google AI API key (get free at https://aistudio.google.com/app/apikey)
+- Optional: Ollama for offline mode
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/saugata-malakar/GEMMA-HACKATHON.git
-cd GEMMA-HACKATHON
-```
+### Installation
 
-### 2. Set Up Python Environment
 ```bash
+# Clone repository
+git clone https://github.com/YOUR_USERNAME/raksha-ai.git
+cd raksha-ai
+
+# Setup Python environment
 cd backend
 python -m venv .venv
-
-# Activate (Windows)
-.venv\Scripts\activate
-# Activate (Linux/Mac)
-source .venv/bin/activate
-
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-```
 
-### 3. Configure Environment
-```bash
-# Copy the example and fill in your values
+# Configure environment
 cp .env.example .env
-```
+# Edit .env and add your GOOGLE_API_KEY
 
-Edit `.env` with your settings:
-```env
-# Required for cloud Gemma 4 (get free key at aistudio.google.com)
-GOOGLE_API_KEY=your_key_here
-GEMMA_CLOUD_MODEL=gemma-4-31b-it
-
-# Optional: local Ollama model
-OLLAMA_BASE_URL=http://localhost:11434
-GEMMA_LOCAL_MODEL=gemma2:9b
-```
-
-### 4. (Optional) Set Up Ollama for Local/Offline Mode
-```bash
-# Install Ollama from https://ollama.com
-# Then pull a supported model (choose based on your VRAM):
-ollama pull gemma2:9b    # ~5.5GB — Recommended
-ollama pull gemma2:27b   # ~16GB — Best quality
-ollama pull mistral:7b   # ~4.1GB — Alternative
-ollama pull llama3.2:3b  # ~2GB   # Lightweight
-```
-
-### 5. Run Startup Diagnostics
-```bash
+# Run diagnostics
 python startup.py
-```
 
-This validates your environment and API connections before launching.
-
-### 6. Start the Server
-
-**Development (with auto-reload):**
-```bash
+# Start server
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-**Production:**
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers
-```
+Open http://localhost:8000
 
-**Then open:** [http://localhost:8000](http://localhost:8000)
-
----
-
-## 🐳 Docker Deployment
+### Docker Deployment
 
 ```bash
-# Set your API key
-export GOOGLE_API_KEY=your_key_here
-
-# Build and run
+export GOOGLE_API_KEY=your_api_key_here
 docker-compose up --build
-
-# Access at http://localhost:8000
 ```
 
----
+### Environment Variables
 
-## 🌐 AI Model Routing
+**Required:**
+- `GOOGLE_API_KEY`: Google AI API key for Gemma 4 31B
 
-RAKSHA AI automatically selects the best available model:
+**Optional:**
+- `HUGGINGFACE_TOKEN`: For BLIP vision (rate-limited without)
+- `GROQ_API_KEY`: Groq vision fallback
+- `MISTRAL_API_KEY`: Mistral vision fallback
+- `OLLAMA_BASE_URL`: Ollama server (default: http://localhost:11434)
+- `GEMMA_LOCAL_MODEL`: Local model name (default: gemma2:9b)
+
+### Local Offline Models
+
+```bash
+# Install Ollama from https://ollama.com
+ollama pull gemma2:9b     # Recommended
+ollama pull gemma2:27b    # Higher quality
+ollama pull mistral:7b    # Alternative
+```
+
+## API Endpoints
+
+### Core Endpoints
+- `GET /health` - Health check
+- `GET /api/v1/status` - System status and model availability
+- `GET /api/v1/incidents` - List incidents
+- `POST /api/v1/incidents` - Create incident
+- `POST /api/v1/assess` - Damage assessment with image
+- `POST /api/v1/chat` - AI conversation with Gemma 4 31B
+- `POST /api/v1/triage` - Medical triage with AI guidance
+- `POST /api/v1/alerts` - Broadcast emergency alert
+- `GET /api/v1/responders` - List responders
+- `POST /api/v1/dispatch` - Dispatch responder to incident
+
+### WebSocket
+- `/ws/dashboard` - Real-time updates
+- `/ws/chat` - Streaming AI chat
+
+### Documentation
+- `/api/docs` - Interactive OpenAPI documentation
+- `/api/redoc` - ReDoc documentation
+
+## Project Structure
 
 ```
-Request → Check connectivity (cached 30s)
-          │
-          ├─ Google AI reachable + API key set?
-          │   YES → Gemma 4 (gemma-4-31b-it) — 3 retries with backoff
-          │
-          ├─ Ollama running + model installed?
-          │   YES → Local model (auto-detected)
-          │
-          └─ Cascade fallback (never fails):
-              → Pollinations free LLM (Mistral, no key)
-              → DuckDuckGo web search
-              → Static emergency protocols
-```
-
----
-
-## 🔑 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
-| `/api/v1/status` | GET | System status + model availability |
-| `/api/v1/incidents` | GET/POST | Incident management |
-| `/api/v1/assess/base64` | POST | Damage assessment (base64 image) |
-| `/api/v1/chat` | POST | AI chat conversation |
-| `/api/v1/triage` | POST | Medical triage with AI guidance |
-| `/api/v1/alerts` | GET/POST | Emergency alerts |
-| `/api/v1/responders` | GET/POST | Responder management |
-| `/ws/dashboard` | WebSocket | Real-time dashboard updates |
-| `/ws/chat` | WebSocket | Streaming AI chat |
-| `/api/docs` | GET | Interactive API documentation |
-
----
-
-## 📱 Offline Mode
-
-RAKSHA AI is an installable Progressive Web App:
-1. Open [http://localhost:8000](http://localhost:8000) in Chrome/Edge
-2. Click "Install" in the browser address bar
-3. The app will cache all UI assets automatically
-4. In offline mode, the app uses local Ollama (if installed) or emergency static protocols
-
----
-
-## 🔒 Security Notes
-
-- No hardcoded API keys in source code
-- All secrets loaded from environment variables
-- `.env` is in `.gitignore`
-- Frontend auth is demo-only (localStorage simulation) — not production auth
-- CORS configured with explicit origin whitelist
-
----
-
-## 📊 Performance
-
-- **Startup time**: ~2s (SQLite init + model check)
-- **Cloud response**: ~2-5s (Gemma 4 27B via Google AI)
-- **Local response**: ~5-15s (Gemma 2 9B on CPU, faster on GPU)
-- **Vision assessment**: ~3-8s (BLIP captioning + LLM analysis)
-- **Database**: SQLite WAL-mode handles concurrent reads with zero latency
-
----
-
-## 🏗️ Project Structure
-
-```
-GEMMA-HACKATHON/
+raksha-ai/
 ├── backend/
-│   ├── main.py              # FastAPI app, WebSocket, routes
-│   ├── gemma_client.py      # Gemma 4 cloud/local routing
-│   ├── ai_core.py           # Multi-provider fallback cascade
-│   ├── vision_agent.py      # BLIP + LLM vision pipeline
-│   ├── triage_agent.py      # Medical triage AI
-│   ├── medical_rag.py       # Protocol retrieval (keyword-based)
-│   ├── multimodal_connectors.py  # Ollama/Groq/Mistral vision
-│   ├── database.py          # SQLite async database layer
-│   ├── models.py            # Pydantic data models
-│   ├── startup.py           # Startup diagnostics
-│   ├── requirements.txt     # Python dependencies
-│   └── .env.example         # Environment template
+│   ├── main.py                      # FastAPI application and routes
+│   ├── gemma_client.py              # Gemma 4 unified client with routing
+│   ├── ai_core.py                   # Multi-provider cascade fallback
+│   ├── providers.py                 # Centralized provider configuration
+│   ├── vision_agent.py              # Multimodal vision pipeline
+│   ├── triage_agent.py              # Medical triage AI logic
+│   ├── medical_rag.py               # Protocol retrieval system
+│   ├── multimodal_connectors.py     # Vision API integrations
+│   ├── database.py                  # SQLite async database layer
+│   ├── models.py                    # Pydantic data models
+│   ├── config.py                    # Environment validation
+│   ├── startup.py                   # Diagnostic checks
+│   ├── requirements.txt             # Python dependencies
+│   └── .env.example                 # Environment template
 ├── frontend/
-│   ├── index.html           # Main application UI
-│   ├── auth.html            # Authentication gate
-│   ├── app.js               # Core JavaScript logic
-│   ├── styles.css           # Design system
-│   ├── dashboard_enhancements.css
-│   ├── manifest.json        # PWA manifest
-│   └── sw.js                # Service worker (offline)
-├── Dockerfile               # Container definition
-├── docker-compose.yml       # Multi-service orchestration
-├── ARCHITECTURE.md          # Detailed architecture docs
-├── KAGGLE_WRITEUP.md        # Hackathon submission writeup
-└── README.md                # This file
+│   ├── index.html                   # Main application interface
+│   ├── auth.html                    # Authentication gate
+│   ├── app.js                       # Core application logic
+│   ├── styles.css                   # Design system
+│   ├── dashboard_enhancements.css   # Additional styling
+│   ├── manifest.json                # PWA manifest
+│   └── sw.js                        # Service worker
+├── Dockerfile                       # Container definition
+├── docker-compose.yml               # Service orchestration
+├── ARCHITECTURE.md                  # Detailed architecture documentation
+└── README.md                        # This file
 ```
+
+## How It Works
+
+### AI Model Routing
+
+RAKSHA AI uses Gemma 4 31B as the primary intelligence engine with automatic fallback:
+
+1. **Gemma 4 31B (Primary)** - Google AI API
+   - Highest quality responses
+   - Native function calling for autonomous actions
+   - Multimodal vision support
+   - Used when GOOGLE_API_KEY is configured
+
+2. **Local Models (Offline)** - Ollama
+   - Runs without internet (gemma2, llama, mistral)
+   - Automatic detection of installed models
+   - Used when cloud is unavailable
+
+3. **Static Protocols (Last Resort)**
+   - Emergency contact numbers
+   - Basic safety procedures
+   - Never fails
+
+### Vision Pipeline
+
+1. Image captioning via HuggingFace BLIP (or Groq/Mistral fallback)
+2. Caption analysis by Gemma 4 31B
+3. Structured JSON output with damage assessment, hazards, and recommendations
+
+### Medical Triage
+
+Gemma 4 31B analyzes symptoms and vitals to provide:
+- START protocol color classification (Red/Yellow/Green/Black)
+- Differential diagnosis
+- Immediate interventions
+- Vital sign targets
+- Transport priority
+
+### Function Calling
+
+Gemma 4 31B can autonomously execute actions:
+- Dispatch responders
+- Broadcast alerts
+- Log triage entries
+- Request resources
+- Calculate medication dosages
+
+## Production Deployment
+
+Recommended platforms:
+- **Oracle Cloud**: Free tier with 24GB RAM
+- **Render.com**: Free tier (cold starts after 15 min)
+- **Railway**: Paid, reliable
+- **DigitalOcean**: App Platform
+
+Configuration checklist:
+- Set `DEBUG=false`
+- Configure `CORS_ORIGINS` with actual domain
+- Use persistent volume for SQLite database
+- Set up health check at `/health`
+- Configure SSL/TLS
+- Implement proper authentication (current auth is demo-only)
+
+## License
+
+Developed for Gemma 4 Hackathon. License terms to be determined.
+
+## Acknowledgments
+
+Built with Gemma 4 31B from Google DeepMind. Vision capabilities powered by HuggingFace BLIP.
