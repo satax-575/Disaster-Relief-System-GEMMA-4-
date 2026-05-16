@@ -114,16 +114,47 @@ export function TriagePage() {
   const allSymptoms = [...PRESET_SYMPTOMS, ...extra];
   const selectedArr = Array.from(selected);
 
+  // Fix 2a — Unique incident ID per submission
+  const incidentIdRef = useRef<string>("");
+
   const handleAssess = async () => {
     if (selectedArr.length === 0) return;
     abortRef.current?.abort();
     abortRef.current = new AbortController();
+
+    // Fix 2a — Debug log to verify symptom state is read correctly
+    const incidentId = `INC-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+    incidentIdRef.current = incidentId;
+    console.log('[Triage] Submitting assessment:', {
+      symptoms: selectedArr,
+      age: age,
+      gender: gender,
+      incidentId,
+      timestamp: new Date().toISOString()
+    });
+    // If selectedArr is always [] or always the same — the chip selection handler is broken.
+
     setLoading(true);
     setLoadingStage("Analyzing symptoms with Gemma 4...");
     setLoadingProgress(20);
     setResult(null);
 
     const BACKEND = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8000";
+
+    const applyResultWithUniquenessCheck = (raw: Record<string, unknown>) => {
+      const normalized = normaliseTriageResult(raw);
+
+      // Fix 2d — uniqueness check: warn if AI returns duplicate/fallback content
+      const triageText = normalized.treatmentNotes + normalized.triageCategory;
+      const currentHash = btoa(unescape(encodeURIComponent(triageText.slice(0, 120))));
+      const lastHash = sessionStorage.getItem('lastTriageHash');
+      if (lastHash === currentHash) {
+        console.warn('⚠️ [Triage] Duplicate response detected — AI may be returning fallback content');
+      }
+      sessionStorage.setItem('lastTriageHash', currentHash);
+
+      setResult(normalized);
+    };
 
     try {
       const res = await fetch(`${BACKEND}/api/v1/triage/guidance/stream`, {
@@ -161,7 +192,7 @@ export function TriagePage() {
             setLoadingStage(data.stage);
             setLoadingProgress(data.progress);
           } else if (event === "complete") {
-            setResult(normaliseTriageResult(data.result as Record<string, unknown>));
+            applyResultWithUniquenessCheck(data.result as Record<string, unknown>);
             setLoadingProgress(100);
           } else if (event === "error") {
             throw new Error(data.message);
@@ -177,7 +208,7 @@ export function TriagePage() {
           { symptoms: selectedArr, age_estimate: age, gender, language: "en" },
           abortRef.current?.signal,
         );
-        setResult(normaliseTriageResult(raw as unknown as Record<string, unknown>));
+        applyResultWithUniquenessCheck(raw as unknown as Record<string, unknown>);
       } catch (fallbackErr: unknown) {
         if ((fallbackErr as { name?: string })?.name === "AbortError") return;
         const msg = fallbackErr instanceof Error

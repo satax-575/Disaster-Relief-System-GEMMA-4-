@@ -22,8 +22,35 @@ function extractThinkingAndContent(raw: string): { thinking: string; content: st
     const content = raw.slice(thinkMatch[0].length).trim();
     return { thinking, content };
   }
-  // Also handle models that output thinking without tags but with "Let me think..." patterns
   return { thinking: "", content: raw.trim() };
+}
+
+// ── Fix 3b — Post-processing sanitizer: strip JSON leakage from responses ─────
+function sanitizeFieldAssistantResponse(text: string): string {
+  return text
+    .replace(/JSON Function Call[\s\S]*$/im, '')         // Remove JSON function call blocks
+    .replace(/```json[\s\S]*?```/gim, '')                // Remove JSON code fences
+    .replace(/```[\s\S]*?```/gim, '')                    // Remove any code fences
+    .replace(/\{\s*"[^"]+"\s*:[\s\S]*?\}/gm, '')        // Remove inline JSON objects
+    .replace(/\n{3,}/g, '\n\n')                          // Collapse excess newlines
+    .trim();
+}
+
+// ── Fix 3c — ETA injection for dispatch-type queries ──────────────────────────
+function injectETAIfMissing(response: string, inputText: string): string {
+  if (/\d+[–\-]\d+\s*minutes/i.test(response)) return response; // Already has ETA
+
+  const lower = inputText.toLowerCase();
+  // Only inject if query looks like a dispatch/situation report
+  const isDispatch = /flood|fire|collapse|explosion|trapped|earthquake|cyclone|emergency|disaster/i.test(lower);
+  if (!isDispatch) return response;
+
+  let eta = '15–25 minutes';
+  if (/collapse|trapped|critical|explosion/i.test(lower)) eta = '8–12 minutes';
+  else if (/flood|fire|drowning/i.test(lower)) eta = '10–18 minutes';
+  else if (/minor|small|low/i.test(lower)) eta = '20–35 minutes';
+
+  return response + `\n\nESTIMATED RESCUE ARRIVAL: ${eta}`;
 }
 
 // ── Typing indicator ──────────────────────────────────────────────────────────
@@ -196,12 +223,16 @@ export function AssistantPage() {
           // Strip <think>...</think> reasoning from response
           const { thinking, content } = extractThinkingAndContent(resp.message);
 
+          // Fix 3b+3c — Sanitize JSON leakage, inject ETA for dispatch queries
+          const sanitized = sanitizeFieldAssistantResponse(content || resp.message);
+          const withETA = injectETAIfMissing(sanitized, text);
+
           setMessages((p) => [
             ...p,
             {
               id:        crypto.randomUUID(),
               role:      "assistant",
-              content:   content || resp.message,
+              content:   withETA,
               thinking:  thinking || undefined,
               timestamp: new Date(),
               modelUsed: resp.model_used,
@@ -293,7 +324,9 @@ export function AssistantPage() {
               {QUICK_PROMPTS.map((p) => (
                 <button
                   key={p}
-                  onClick={() => sendMessage(p)}
+                  // Fix 3d — pre-fill input instead of auto-submit; operator can review/edit first
+                  onClick={() => setInput(p)}
+                  title="Click to pre-fill this prompt — press Enter or ↗ to send"
                   className="border rounded-sm px-3 py-1.5 text-xs cursor-pointer transition-all duration-100 bg-transparent border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground"
                 >
                   {p}

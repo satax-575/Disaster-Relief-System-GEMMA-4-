@@ -16,7 +16,19 @@ COPY . .
 
 # Build the React frontend
 RUN npm install
-RUN VITE_BACKEND_URL="" npm run build
+
+# Inject public Firebase variables for the frontend build
+RUN echo "VITE_FIREBASE_API_KEY=AIzaSyD_UuU5v0sWH3nSTxwSAY60AeuuV934bjQ" >> .env && \
+    echo "VITE_FIREBASE_AUTH_DOMAIN=gemma-4-rakshak-ai.firebaseapp.com" >> .env && \
+    echo "VITE_FIREBASE_PROJECT_ID=gemma-4-rakshak-ai" >> .env && \
+    echo "VITE_FIREBASE_APP_ID=1:879818343352:web:ff25f7d0ac964060b4454d" >> .env && \
+    echo "VITE_FIREBASE_STORAGE_BUCKET=gemma-4-rakshak-ai.firebasestorage.app" >> .env && \
+    echo "VITE_FIREBASE_MESSAGING_SENDER_ID=879818343352" >> .env && \
+    echo "VITE_FIREBASE_MEASUREMENT_ID=G-5F714P0HG0" >> .env && \
+    echo "VITE_AI_MODEL_NAME=Gemma 4 31B" >> .env && \
+    echo "VITE_BACKEND_URL=" >> .env
+
+RUN npm run build
 
 # Copy backend requirements and install
 RUN pip install --no-cache-dir -r backend/requirements.txt

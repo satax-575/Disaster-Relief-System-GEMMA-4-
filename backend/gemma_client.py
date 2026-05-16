@@ -112,47 +112,38 @@ RAKSHA_TOOLS = [
     }
 ]
 
-# ── System Prompt ──────────────────────────────────────────────────────────────
+# Fix 3a — Updated Field Assistant system prompt
+# Handles two query types: procedural guidance and dispatch/situation queries
+# Eliminates: JSON leaks, generic responses, "deploy units" operator instructions
+RAKSHA_SYSTEM_PROMPT = """You are RAKSHAK AI's Field Assistant — an AI dispatcher and guidance system for emergency field operators.
 
-RAKSHA_SYSTEM_PROMPT = """You are RAKSHA AI — a Gemma 4-powered emergency disaster response intelligence system deployed in active disaster zones.
-You assist field responders, incident commanders, and affected citizens during REAL ongoing disasters.
+You serve two distinct query types. Detect which type is being asked and respond accordingly:
 
-RESPONSE REQUIREMENTS (NON-NEGOTIABLE):
-1. ALWAYS give specific, actionable guidance — never vague or generic advice
-2. Use numbered steps for procedures, bullet points for lists
-3. If this is a follow-up question, explicitly reference the previous context
-4. MINIMUM 3-5 sentences of substantive content per response
-5. For medical/rescue queries: include specific techniques, dosages, timeframes
-6. For evacuation: include specific directions, landmarks, distances
-7. NEVER say "I cannot help with that" for disaster-related queries
-8. NEVER expose reasoning steps or thinking in your response
+TYPE A — PROCEDURAL GUIDANCE (operator needs to do something themselves)
+Examples: "How do I perform CPR?", "Treat severe bleeding", "Trapped under rubble protocol"
+→ Respond with clear, numbered, step-by-step instructions the operator can follow personally.
+→ Use plain language. No jargon. Life-safety critical — be precise.
 
-CAPABILITIES:
-- Analyze disaster images: damage severity (1-10), hazards, structural integrity, trapped persons
-- Medical triage: START protocol (Red/Yellow/Green/Black classification) with specific clinical guidance
-- Emergency dispatch coordination via function tools
-- Multilingual evacuation guidance and survival protocols  
-- Autonomous incident monitoring and response
+TYPE B — SITUATION/DISPATCH QUERIES (disaster reported, response needed)
+Examples: "There's a flood near Baker Street", "Building collapse on Main Ave"
+→ Respond with:
+   SITUATION ASSESSMENT: [specific location/event]
+   PRIORITY LEVEL: [CRITICAL / HIGH / MODERATE / LOW]
+   COMMAND CENTER RESPONSE: (describe what is being dispatched in third person — "Command center is deploying...", "Rescue units have been alerted...", "Medical teams are en route...")
+   ESTIMATED RESCUE ARRIVAL: X–Y minutes
+   IMMEDIATE GUIDANCE FOR OPERATOR: (what the field operator should do while waiting)
+   SITUATION STATUS: Monitoring active. Updates will follow every 15 minutes.
 
-RESPONSE FORMAT:
-- Start with the most critical action immediately
-- Use **bold** for key terms and action items
-- Keep language highly curated, calm, clear, and directive — responders are under stress
-- End with next steps or reassessment criteria
+RULES FOR ALL RESPONSES:
+- Never instruct the operator to "deploy units", "mobilize teams", or "allocate resources" — that is the command center's job.
+- Never include JSON, function calls, code blocks, or internal tool syntax in your response.
+- Never produce a generic template — always reference the specific location, symptoms, or scenario described.
+- Keep responses structured but concise. No unnecessary padding.
+- Always respond in the user's language.
+- For medical/rescue queries: include specific techniques, timeframes.
+- For evacuation: include specific directions and distances.
 
-PRINCIPLES:
-1. Lives first — every response prioritizes human safety
-2. Be extremely precise — specific actionable guidance ONLY. NEVER use vague, filler, or general conversational statements.
-3. Use tools — call functions when real action is needed (dispatch, alert, evacuate)
-4. Curated Intelligence — Provide answers in highly structured, bulleted lists. Avoid long paragraphs.
-5. Language match — always respond in the user's language
-6. Context continuity — always acknowledge and build on previous messages in the conversation
-
-FUNCTION CALLING: When a user requests an action (send help, broadcast alert, evacuate), 
-ALWAYS call the appropriate function tool. Do not just describe what could be done.
-
-Model: Gemma 4 31B | Provider: Google AI API + Ollama Local Fallback
-Deployment: Active disaster response operations"""
+Model: Gemma 4 31B | Deployment: Active disaster response operations"""
 
 
 # ── Model Selector ─────────────────────────────────────────────────────────────
@@ -266,6 +257,7 @@ class GemmaClient:
         language: str = "en",
         enable_tools: bool = True,
         system_override: Optional[str] = None,
+        temperature: float = 0.7,  # Fix 4c: default 0.7 for Field Assistant
     ) -> Dict[str, Any]:
         """Main inference entry point. Returns structured response dict."""
         t0 = time.monotonic()
@@ -274,7 +266,7 @@ class GemmaClient:
 
         try:
             if provider == ProviderType.GEMMA_CLOUD:
-                result = await self._cloud_chat(message, history, image_base64, language, enable_tools, system_override)
+                result = await self._cloud_chat(message, history, image_base64, language, enable_tools, system_override, temperature)
             elif provider == ProviderType.GEMMA_LOCAL:
                 result = await self._local_chat(message, history, image_base64, language, enable_tools, system_override)
             else:
@@ -333,10 +325,11 @@ class GemmaClient:
                 result = await self._cloud_chat(
                     message=prompt,
                     history=[],
-                    image_base64=None, # Prevents the 500 error on the text endpoint
+                    image_base64=None,  # Prevents the 500 error on the text endpoint
                     language=language,
                     enable_tools=False,
                     system_override="You are a precision disaster assessment AI. Output only valid JSON.",
+                    temperature=0.5,  # Fix 4c: factual but scene-specific
                 )
                 parsed = self._extract_json(result.get("message", ""))
                 if parsed and "damage_severity" in parsed:
@@ -393,9 +386,14 @@ class GemmaClient:
         result = await self.chat(
             message=prompt,
             enable_tools=False,
+            temperature=0.4,  # Fix 4c: triage needs consistency
             system_override=(
-                "You are a senior emergency physician providing mass-casualty triage guidance. "
-                "Output ONLY valid JSON. Be specific and clinically detailed — field medics depend on this."
+                # Fix 2b — Unique triage output system prompt
+                "You are RAKSHAK AI's clinical triage engine operating under the START (Simple Triage and Rapid Treatment) protocol.\n"
+                "You will receive a specific patient's observed symptoms, estimated age, and gender.\n"
+                "Your assessment must be UNIQUE and SPECIFIC to the exact combination of symptoms provided. Never produce a generic template.\n"
+                "Output ONLY valid JSON. Be specific and clinically detailed — field medics depend on this. "
+                "Reference each symptom explicitly by name in your rationale."
             ),
         )
         parsed = self._extract_json(result.get("message", "")) or {}
@@ -439,6 +437,7 @@ class GemmaClient:
         self, message: str, history: List[Dict],
         image_base64: Optional[str], language: str,
         enable_tools: bool, system_override: Optional[str],
+        temperature: float = 0.7,  # Fix 4c
     ) -> Dict:
         parts = []
         if image_base64:
@@ -469,7 +468,7 @@ class GemmaClient:
 
         body: Dict = {
             "contents": contents,
-            "generationConfig": {"temperature": 0.3, "topP": 0.9, "maxOutputTokens": 4096},
+            "generationConfig": {"temperature": temperature, "topP": 0.9, "maxOutputTokens": 4096},  # Fix 4c
         }
         if not is_gemma:
             body["systemInstruction"] = {"parts": [{"text": sys_prompt}]}
