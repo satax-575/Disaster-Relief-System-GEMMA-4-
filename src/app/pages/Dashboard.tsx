@@ -3,6 +3,7 @@ import { useTopbar } from "../components/app/AppLayout";
 import { MetricCard, SeverityBadge, EmptyState, DangerButton } from "../components/shared/index";
 import { useDashboardStats, useIncidents, useAlerts, timeAgo } from "../../lib/hooks";
 import { IncidentModal } from "./IncidentsPage";
+import { useLocation } from "../../contexts/LocationContext";
 
 // Lazy-load leaflet map — not in main bundle
 const LiveMap = lazy(() => import("../components/app/LiveMap"));
@@ -38,6 +39,7 @@ export function Dashboard() {
   const { set }  = useTopbar();
   const stats    = useDashboardStats();
   const [showModal, setShowModal] = useState(false);
+  const geo      = useLocation();   // user geolocation from LocationContext
 
   const { data: incidents } = useIncidents();
   const { data: alerts }    = useAlerts();
@@ -93,7 +95,11 @@ export function Dashboard() {
               </div>
             }
           >
-            <LiveMap incidents={recentIncidents} />
+            <LiveMap
+            incidents={recentIncidents}
+            userLat={geo.granted ? geo.lat : null}
+            userLng={geo.granted ? geo.lng : null}
+          />
           </Suspense>
         </div>
       </div>

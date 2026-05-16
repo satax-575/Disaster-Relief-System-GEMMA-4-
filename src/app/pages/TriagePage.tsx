@@ -5,9 +5,10 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useTriageLog, addTriageEntry, timeAgo } from "../../lib/hooks";
 import {
   SectionCard, EmptyState, PrimaryButton,
-  Chip, FormSelect, TriageBadge,
+  Chip, TriageBadge,
 } from "../components/shared/index";
 import { FormInput } from "../components/shared/index";
+import { CustomDropdown } from "../components/shared/CustomDropdown";
 import type { TriageAssessmentResult } from "../../lib/types";
 
 const PRESET_SYMPTOMS = [
@@ -278,17 +279,23 @@ export function TriagePage() {
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div>
             <label className="text-muted-foreground/60 text-[11px] uppercase tracking-widest block mb-1.5">Age Estimate</label>
-            <FormSelect value={age} onChange={(e) => setAge(e.target.value)}>
-              {["Unknown","Child (0-12)","Teen (13-17)","Adult (18-60)","Elderly (60+)"].map((a) => (
-                <option key={a} value={a}>{a}</option>
-              ))}
-            </FormSelect>
+            <CustomDropdown
+              id="triage-age-dropdown"
+              options={["Unknown","Child (0-12)","Teen (13-17)","Adult (18-60)","Elderly (60+)"]}
+              value={age}
+              onChange={setAge}
+              placeholder="Unknown"
+            />
           </div>
           <div>
             <label className="text-muted-foreground/60 text-[11px] uppercase tracking-widest block mb-1.5">Gender</label>
-            <FormSelect value={gender} onChange={(e) => setGender(e.target.value)}>
-              {["Unknown","Male","Female","Other"].map((g) => <option key={g}>{g}</option>)}
-            </FormSelect>
+            <CustomDropdown
+              id="triage-gender-dropdown"
+              options={["Unknown","Male","Female","Other"]}
+              value={gender}
+              onChange={setGender}
+              placeholder="Unknown"
+            />
           </div>
         </div>
 

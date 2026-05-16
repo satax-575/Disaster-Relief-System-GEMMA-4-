@@ -128,17 +128,29 @@ export function CustomDropdown({ options, value, onChange, placeholder, id }: Cu
 export const DISASTER_TYPES = [
   "Earthquake",
   "Flood",
-  "Fire",
-  "Cyclone",
+  "Fire / Wildfire",
+  "Cyclone / Hurricane",
   "Landslide",
   "Building Collapse",
+  "Tsunami",
+  "Industrial Accident",
+  "Chemical / Gas Leak",
+  "Bridge Failure",
+  "Dam Break",
+  "Drought / Heatwave",
+  "Avalanche",
+  "Volcanic Eruption",
+  "Explosion / Blast",
 ];
 
 export const BUILDING_TYPES = [
   "Residential",
   "Commercial",
   "Industrial",
-  "Hospital",
-  "School",
+  "Hospital / Medical",
+  "School / University",
   "Bridge / Infrastructure",
+  "Factory / Warehouse",
+  "Government / Public",
+  "High-Rise / Skyscraper",
 ];

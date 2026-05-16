@@ -1,13 +1,5 @@
 // ── LiveMap — Leaflet component, lazy-loaded so it's not in the main bundle ──
-// Import: `const LiveMap = lazy(() => import("../components/app/LiveMap"))`
-//
-// FIX HISTORY:
-// v1: Added useState(false) mounted guard — partially fixed React #300
-// v2: Replaced react-leaflet with pure Leaflet imperative API to completely
-//     eliminate the react-leaflet context/reconciler conflict that caused #300.
-//     react-leaflet's MapContainer uses React context internally, which breaks
-//     under React 18 Concurrent Mode + Suspense lazy loading on first render.
-
+// v3: Added userLocation prop — re-centers map to user's coordinates when granted.
 import { useEffect, useRef } from "react";
 import type { Incident } from "../../lib/types";
 import "leaflet/dist/leaflet.css";
@@ -34,20 +26,21 @@ const severityColor: Record<string, string> = {
 
 interface LiveMapProps {
   incidents: Incident[];
+  userLat?: number | null;
+  userLng?: number | null;
 }
 
 // ── Pure imperative Leaflet (no react-leaflet) — avoids React #300 completely
-// react-leaflet wraps Leaflet in React context which conflicts with Concurrent Mode.
-// Using Leaflet's vanilla API directly is 100% safe in any React version.
-export default function LiveMap({ incidents }: LiveMapProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef       = useRef<L.Map | null>(null);
-  const markersRef   = useRef<L.CircleMarker[]>([]);
+export default function LiveMap({ incidents, userLat, userLng }: LiveMapProps) {
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const mapRef         = useRef<L.Map | null>(null);
+  const markersRef     = useRef<L.CircleMarker[]>([]);
+  const userMarkerRef  = useRef<L.CircleMarker | null>(null);
 
   // ── Initialize map once on mount ─────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
-    if (!el || mapRef.current) return; // already initialized
+    if (!el || mapRef.current) return;
 
     const map = L.map(el, {
       center: [20.5937, 78.9629],
@@ -67,7 +60,6 @@ export default function LiveMap({ incidents }: LiveMapProps) {
 
     mapRef.current = map;
 
-    // ResizeObserver to handle container size changes
     const ro = new ResizeObserver(() => map.invalidateSize());
     ro.observe(el);
 
@@ -76,18 +68,45 @@ export default function LiveMap({ incidents }: LiveMapProps) {
       map.remove();
       mapRef.current = null;
     };
-  }, []); // run once only
+  }, []);
+
+  // ── Re-center to user location when granted ───────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !userLat || !userLng) return;
+
+    map.setView([userLat, userLng], 10, { animate: true });
+
+    // Remove old user marker
+    userMarkerRef.current?.remove();
+
+    // Add pulsing user location indicator
+    const userMarker = L.circleMarker([userLat, userLng], {
+      radius:      10,
+      fillColor:   "#22c55e",
+      color:       "#16a34a",
+      weight:      2,
+      opacity:     1,
+      fillOpacity: 0.7,
+    });
+    userMarker.bindPopup(
+      `<div style="font-family:Sora,sans-serif;font-size:12px">
+        <strong>📍 Your Location</strong><br/>
+        ${userLat.toFixed(4)}, ${userLng.toFixed(4)}
+      </div>`,
+    );
+    userMarker.addTo(map);
+    userMarkerRef.current = userMarker;
+  }, [userLat, userLng]);
 
   // ── Sync incident markers when data changes ───────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Remove old markers
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
-    // Add new markers
     incidents.forEach((inc) => {
       const lat = inc.lat ?? 20.5937;
       const lng = inc.lng ?? 78.9629;
@@ -116,14 +135,9 @@ export default function LiveMap({ incidents }: LiveMapProps) {
 
   return (
     <div className="relative h-full rounded-lg overflow-hidden">
-      {/* Map container — Leaflet mounts imperatively into this div */}
       <div
         ref={containerRef}
-        style={{
-          height:     "100%",
-          width:      "100%",
-          background: "hsl(0 0% 8%)",
-        }}
+        style={{ height: "100%", width: "100%", background: "hsl(0 0% 8%)" }}
       />
 
       {/* Legend */}
@@ -137,6 +151,10 @@ export default function LiveMap({ incidents }: LiveMapProps) {
             <span className="text-muted-foreground/70">{k}</span>
           </div>
         ))}
+        <div className="flex items-center gap-2 mt-1 border-t border-white/10 pt-1">
+          <span style={{ color: "#22c55e" }}>●</span>
+          <span className="text-muted-foreground/70">Your Location</span>
+        </div>
       </div>
     </div>
   );

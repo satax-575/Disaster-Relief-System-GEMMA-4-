@@ -5,6 +5,10 @@ import { useAuth } from "../../contexts/AuthContext";
 import type { ChatMessage as AppChatMessage } from "../../lib/types";
 import { sendChatMessage, ApiError } from "../../lib/api";
 import type { ChatMessage as ApiChatMsg } from "../../lib/api";
+import {
+  doc, setDoc, getDoc, serverTimestamp,
+} from "firebase/firestore";
+import { db as firestoreDb } from "../../lib/firebase";
 
 const QUICK_PROMPTS = [
   "How do I perform CPR?",
@@ -13,6 +17,9 @@ const QUICK_PROMPTS = [
   "Flood evacuation steps",
   "Emergency contact protocol",
 ];
+
+const MAX_STORED_MESSAGES = 60;  // Keep last 60 messages in Firestore
+const SAVE_DEBOUNCE_MS    = 1500; // Wait 1.5s after last message to save
 
 // ── Strip <think>...</think> blocks from AI response ─────────────────────────
 function extractThinkingAndContent(raw: string): { thinking: string; content: string } {
@@ -28,28 +35,24 @@ function extractThinkingAndContent(raw: string): { thinking: string; content: st
 // ── Fix 3b — Post-processing sanitizer: strip JSON leakage from responses ─────
 function sanitizeFieldAssistantResponse(text: string): string {
   return text
-    .replace(/JSON Function Call[\s\S]*$/im, '')         // Remove JSON function call blocks
-    .replace(/```json[\s\S]*?```/gim, '')                // Remove JSON code fences
-    .replace(/```[\s\S]*?```/gim, '')                    // Remove any code fences
-    .replace(/\{\s*"[^"]+"\s*:[\s\S]*?\}/gm, '')        // Remove inline JSON objects
-    .replace(/\n{3,}/g, '\n\n')                          // Collapse excess newlines
+    .replace(/JSON Function Call[\s\S]*$/im, "")
+    .replace(/```json[\s\S]*?```/gim, "")
+    .replace(/```[\s\S]*?```/gim, "")
+    .replace(/\{\s*"[^"]+"\s*:[\s\S]*?\}/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
 // ── Fix 3c — ETA injection for dispatch-type queries ──────────────────────────
 function injectETAIfMissing(response: string, inputText: string): string {
-  if (/\d+[–\-]\d+\s*minutes/i.test(response)) return response; // Already has ETA
-
+  if (/\d+[–\-]\d+\s*minutes/i.test(response)) return response;
   const lower = inputText.toLowerCase();
-  // Only inject if query looks like a dispatch/situation report
   const isDispatch = /flood|fire|collapse|explosion|trapped|earthquake|cyclone|emergency|disaster/i.test(lower);
   if (!isDispatch) return response;
-
-  let eta = '15–25 minutes';
-  if (/collapse|trapped|critical|explosion/i.test(lower)) eta = '8–12 minutes';
-  else if (/flood|fire|drowning/i.test(lower)) eta = '10–18 minutes';
-  else if (/minor|small|low/i.test(lower)) eta = '20–35 minutes';
-
+  let eta = "15–25 minutes";
+  if (/collapse|trapped|critical|explosion/i.test(lower)) eta = "8–12 minutes";
+  else if (/flood|fire|drowning/i.test(lower)) eta = "10–18 minutes";
+  else if (/minor|small|low/i.test(lower)) eta = "20–35 minutes";
   return response + `\n\nESTIMATED RESCUE ARRIVAL: ${eta}`;
 }
 
@@ -67,7 +70,6 @@ function TypingIndicator() {
 // ── Collapsible Thinking block ────────────────────────────────────────────────
 function ThinkingBlock({ thinking }: { thinking: string }) {
   const [open, setOpen] = useState(false);
-
   return (
     <div className="mb-2">
       <button
@@ -75,13 +77,8 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 text-muted-foreground/40 text-xs hover:text-muted-foreground/70 transition-colors"
       >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 12 12"
-          fill="none"
-          className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}
-        >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+          className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`}>
           <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <span>{open ? "Hide" : "Show"} reasoning</span>
@@ -89,10 +86,7 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
       {open && (
         <div
           className="mt-1.5 px-3 py-2 rounded-lg text-xs text-muted-foreground/50 leading-relaxed whitespace-pre-wrap border border-white/[0.05]"
-          style={{
-            background: "rgba(255,255,255,0.02)",
-            animation: "fade-in 0.2s ease-out",
-          }}
+          style={{ background: "rgba(255,255,255,0.02)", animation: "fade-in 0.2s ease-out" }}
         >
           {thinking}
         </div>
@@ -101,36 +95,29 @@ function ThinkingBlock({ thinking }: { thinking: string }) {
   );
 }
 
-// ── Markdown-lite renderer: bold, bullet lists ────────────────────────────────
+// ── Markdown-lite renderer ────────────────────────────────────────────────────
 function MessageContent({ text }: { text: string }) {
   const lines = text.split("\n");
   return (
     <div className="space-y-1">
       {lines.map((line, i) => {
         const parts = line.split(/\*\*(.*?)\*\*/g);
-        const rendered = parts.map((part, j) =>
-          j % 2 === 1 ? <strong key={j} className="font-semibold text-foreground">{part}</strong> : part
+        const rendered = parts.map((p, j) =>
+          j % 2 === 1 ? <strong key={j} className="font-semibold text-foreground">{p}</strong> : p
         );
         if (line.startsWith("- ") || line.startsWith("• ")) {
-          return (
-            <div key={i} className="flex gap-2">
-              <span className="text-primary flex-shrink-0 mt-0.5">•</span>
-              <span>{rendered}</span>
-            </div>
-          );
+          return <div key={i} className="flex items-start gap-2">
+            <span className="text-primary mt-0.5 flex-shrink-0">•</span>
+            <span>{rendered}</span>
+          </div>;
         }
-        if (/^\d+\.\s/.test(line)) {
-          const num = line.match(/^(\d+)\.\s/)?.[1];
-          const rest = line.replace(/^\d+\.\s/, "");
-          const restParts = rest.split(/\*\*(.*?)\*\*/g).map((p, j) =>
-            j % 2 === 1 ? <strong key={j} className="font-semibold text-foreground">{p}</strong> : p
-          );
-          return (
-            <div key={i} className="flex gap-2">
-              <span className="text-primary font-bold flex-shrink-0 mt-0.5">{num}.</span>
-              <span>{restParts}</span>
-            </div>
-          );
+        const numMatch = line.match(/^(\d+)\.\s(.+)/);
+        if (numMatch) {
+          const [, num, restParts] = numMatch;
+          return <div key={i} className="flex items-start gap-2">
+            <span className="text-primary font-bold flex-shrink-0 mt-0.5">{num}.</span>
+            <span>{restParts}</span>
+          </div>;
         }
         if (line === "") return <div key={i} className="h-1" />;
         return <p key={i}>{rendered}</p>;
@@ -139,24 +126,92 @@ function MessageContent({ text }: { text: string }) {
   );
 }
 
-// ── Extended message type with thinking field ─────────────────────────────────
+// ── Extended message type ─────────────────────────────────────────────────────
 interface RichChatMessage extends AppChatMessage {
   thinking?: string;
   modelUsed?: string;
 }
 
+// ── Firestore persistence helpers ─────────────────────────────────────────────
+// Schema: users/{uid}/chatHistory/field_assistant
+// { messages: [...], sessionId: string, updatedAt: serverTimestamp }
+
+function serializeMessages(msgs: RichChatMessage[]) {
+  return msgs.slice(-MAX_STORED_MESSAGES).map((m) => ({
+    id:        m.id,
+    role:      m.role,
+    content:   m.content,
+    timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
+    thinking:  m.thinking ?? null,
+    modelUsed: m.modelUsed ?? null,
+    // Don't store imageUrl (large base64) — just flag that an image was attached
+    hadImage:  !!m.imageUrl,
+  }));
+}
+
+function deserializeMessages(raw: unknown[]): RichChatMessage[] {
+  return (raw ?? []).map((m: unknown) => {
+    const msg = m as Record<string, unknown>;
+    return {
+      id:        (msg.id as string) ?? crypto.randomUUID(),
+      role:      (msg.role as "user" | "assistant") ?? "user",
+      content:   (msg.content as string) ?? "",
+      timestamp: msg.timestamp ? new Date(msg.timestamp as string) : new Date(),
+      thinking:  (msg.thinking as string | undefined) ?? undefined,
+      modelUsed: (msg.modelUsed as string | undefined) ?? undefined,
+      imageUrl:  undefined, // base64 not persisted
+    };
+  });
+}
+
+async function loadChatFromFirestore(uid: string): Promise<{ messages: RichChatMessage[]; sessionId?: string }> {
+  try {
+    const ref = doc(firestoreDb, "users", uid, "chatHistory", "field_assistant");
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return { messages: [] };
+    const data = snap.data() as Record<string, unknown>;
+    const messages = deserializeMessages((data.messages as unknown[]) ?? []);
+    const sessionId = (data.sessionId as string | undefined) ?? undefined;
+    return { messages, sessionId };
+  } catch (e) {
+    console.warn("[AssistantPage] Failed to load chat from Firestore:", e);
+    return { messages: [] };
+  }
+}
+
+async function saveChatToFirestore(
+  uid: string,
+  messages: RichChatMessage[],
+  sessionId?: string,
+): Promise<void> {
+  try {
+    const ref = doc(firestoreDb, "users", uid, "chatHistory", "field_assistant");
+    await setDoc(ref, {
+      messages:   serializeMessages(messages),
+      sessionId:  sessionId ?? null,
+      updatedAt:  serverTimestamp(),
+      messageCount: messages.length,
+    }, { merge: true });
+  } catch (e) {
+    console.warn("[AssistantPage] Failed to save chat to Firestore:", e);
+  }
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 export function AssistantPage() {
   const { set }                   = useTopbar();
   const { user }                  = useAuth();
   const [messages, setMessages]   = useState<RichChatMessage[]>([]);
   const [input, setInput]         = useState("");
   const [typing, setTyping]       = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [imageFile, setImageFile] = useState<{ base64: string; type: string } | null>(null);
   const fileRef                   = useRef<HTMLInputElement>(null);
   const bottomRef                 = useRef<HTMLDivElement>(null);
   const abortRef                  = useRef<AbortController | null>(null);
   const sessionIdRef              = useRef<string | undefined>(undefined);
   const chatAreaRef               = useRef<HTMLDivElement>(null);
+  const saveTimerRef              = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const topbarRight = useMemo(() => (
     <div className="flex items-center gap-2">
@@ -168,6 +223,38 @@ export function AssistantPage() {
   useEffect(() => {
     set({ title: "Field Assistant", right: topbarRight });
   }, [set, topbarRight]);
+
+  // ── Load chat history from Firestore on mount ─────────────────────────────
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    loadChatFromFirestore(user.uid).then(({ messages: loaded, sessionId }) => {
+      if (cancelled) return;
+      if (loaded.length > 0) {
+        setMessages(loaded);
+        sessionIdRef.current = sessionId;
+        toast.success(`Chat restored — ${loaded.length} messages`, {
+          duration: 3000,
+          description: "Your previous conversation has been loaded.",
+        });
+      }
+      setHistoryLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [user?.uid]);
+
+  // ── Debounced save to Firestore on message changes ────────────────────────
+  // Only save after history is loaded (prevents overwriting on first render)
+  useEffect(() => {
+    if (!historyLoaded || !user?.uid) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveChatToFirestore(user!.uid!, messages, sessionIdRef.current);
+    }, SAVE_DEBOUNCE_MS);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [messages, historyLoaded, user?.uid]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -189,18 +276,12 @@ export function AssistantPage() {
     };
 
     // ── CRITICAL FIX: capture messages BEFORE state update, build history from it ──
-    // Using the functional updater pattern ensures we read latest state.
-    // We add the user message and immediately derive history from the same snapshot.
     setMessages((prev) => {
-      // Build API history from previous messages (max 10 turns for context window)
-      // This is the correct place to read prev — not in the outer closure
       const history: ApiChatMsg[] = prev.slice(-10).map((m) => ({
         role:    m.role as "user" | "assistant",
         content: m.content,
       }));
 
-      // Fire the async request — we capture history here inside the closure
-      // where prev is accurate and includes all messages so far
       void (async () => {
         setInput("");
         setImageFile(null);
@@ -210,7 +291,7 @@ export function AssistantPage() {
           const resp = await sendChatMessage(
             {
               message:      text,
-              history,      // ← correct history at time of send
+              history,
               image_base64: imgData?.base64,
               language:     "en",
               session_id:   sessionIdRef.current,
@@ -220,12 +301,9 @@ export function AssistantPage() {
 
           sessionIdRef.current = resp.session_id;
 
-          // Strip <think>...</think> reasoning from response
           const { thinking, content } = extractThinkingAndContent(resp.message);
-
-          // Fix 3b+3c — Sanitize JSON leakage, inject ETA for dispatch queries
           const sanitized = sanitizeFieldAssistantResponse(content || resp.message);
-          const withETA = injectETAIfMissing(sanitized, text);
+          const withETA   = injectETAIfMissing(sanitized, text);
 
           setMessages((p) => [
             ...p,
@@ -251,7 +329,7 @@ export function AssistantPage() {
 
       return [...prev, userMsg];
     });
-  }, []); // ← empty deps: sendMessage doesn't close over messages anymore
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -272,10 +350,14 @@ export function AssistantPage() {
     e.target.value = "";
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
     abortRef.current?.abort();
     setMessages([]);
     sessionIdRef.current = undefined;
+    // Clear from Firestore too
+    if (user?.uid) {
+      await saveChatToFirestore(user.uid, [], undefined);
+    }
   };
 
   return (
@@ -289,12 +371,13 @@ export function AssistantPage() {
           className="flex items-center justify-between px-6 py-2 flex-shrink-0"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
         >
-          <span className="text-muted-foreground/40 text-xs">
-            {messages.filter(m => m.role === "user").length} messages · Session active
+          <span className="text-muted-foreground/40 text-xs" id="chat-message-count">
+            {messages.filter(m => m.role === "user").length} messages · Session active · Auto-saved
           </span>
           <button
             onClick={clearChat}
             className="text-muted-foreground/40 text-xs hover:text-destructive transition-colors"
+            id="chat-clear-btn"
           >
             Clear chat
           </button>
@@ -312,9 +395,7 @@ export function AssistantPage() {
             <p className="mt-2 text-muted-foreground/50 text-sm text-center max-w-sm">
               Damage assessment · Evacuation guidance · Medical triage · Emergency coordination
             </p>
-            <p className="mt-1 text-muted-foreground/25 text-xs text-center">
-              Powered by Gemma 4 31B
-            </p>
+            <p className="mt-1 text-muted-foreground/25 text-xs text-center">Powered by Gemma 4 31B</p>
             {user && (
               <p className="mt-1 text-muted-foreground/30 text-xs text-center">
                 Logged in as {user.displayName ?? user.email}
@@ -324,7 +405,6 @@ export function AssistantPage() {
               {QUICK_PROMPTS.map((p) => (
                 <button
                   key={p}
-                  // Fix 3d — pre-fill input instead of auto-submit; operator can review/edit first
                   onClick={() => setInput(p)}
                   title="Click to pre-fill this prompt — press Enter or ↗ to send"
                   className="border rounded-sm px-3 py-1.5 text-xs cursor-pointer transition-all duration-100 bg-transparent border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground"
@@ -343,13 +423,8 @@ export function AssistantPage() {
                   : "mr-auto bg-white/[0.04] border border-white/[0.08] text-foreground/90 text-sm px-4 py-3 rounded-xl rounded-bl-none max-w-[80%] leading-relaxed"
                 }>
                   {msg.imageUrl && (
-                    <img
-                      src={msg.imageUrl}
-                      alt="attachment"
-                      className="max-h-40 rounded-lg mb-2 object-cover"
-                    />
+                    <img src={msg.imageUrl} alt="attachment" className="max-h-40 rounded-lg mb-2 object-cover" />
                   )}
-                  {/* Show collapsible thinking block for assistant messages */}
                   {msg.role === "assistant" && msg.thinking && (
                     <ThinkingBlock thinking={msg.thinking} />
                   )}
@@ -361,12 +436,12 @@ export function AssistantPage() {
                 </div>
                 <div className={`flex items-center gap-2 mt-1 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   <p className="text-[10px] text-muted-foreground/30">
-                    {msg.timestamp.toLocaleTimeString("en-US", { hour12: true })}
+                    {msg.timestamp instanceof Date
+                      ? msg.timestamp.toLocaleTimeString("en-US", { hour12: true })
+                      : new Date(msg.timestamp).toLocaleTimeString("en-US", { hour12: true })}
                   </p>
                   {msg.role === "assistant" && msg.modelUsed && (
-                    <p className="text-[10px] text-muted-foreground/20">
-                      · {msg.modelUsed}
-                    </p>
+                    <p className="text-[10px] text-muted-foreground/20">· {msg.modelUsed}</p>
                   )}
                 </div>
               </div>
@@ -379,16 +454,11 @@ export function AssistantPage() {
 
       {/* Attached image preview */}
       {imageFile && (
-        <div
-          className="px-6 py-2 flex items-center gap-3 flex-shrink-0"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}
-        >
+        <div className="px-6 py-2 flex items-center gap-3 flex-shrink-0"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
           <span className="text-primary text-xs">📎 Image attached</span>
-          <button
-            type="button"
-            onClick={() => setImageFile(null)}
-            className="text-muted-foreground/40 text-xs hover:text-destructive transition-colors"
-          >
+          <button type="button" onClick={() => setImageFile(null)}
+            className="text-muted-foreground/40 text-xs hover:text-destructive transition-colors">
             Remove
           </button>
         </div>
@@ -399,25 +469,16 @@ export function AssistantPage() {
         className="px-6 py-4 flex items-center gap-3 flex-shrink-0"
         style={{ borderTop: "1px solid rgba(255,255,255,0.06)", background: "hsl(0 0% 8%)" }}
       >
-        <button
-          type="button"
-          title="Attach image"
-          onClick={() => fileRef.current?.click()}
-          className="text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-lg px-3 py-2 transition-colors flex-shrink-0"
-        >
+        <button type="button" title="Attach image" onClick={() => fileRef.current?.click()}
+          className="text-xs text-muted-foreground hover:text-foreground border border-white/10 rounded-lg px-3 py-2 transition-colors flex-shrink-0">
           📎
         </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleFileChange}
-        />
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
 
         <div className="flex-1 relative">
           <textarea
             rows={1}
+            id="chat-input"
             className="w-full bg-white/[0.04] border border-white/[0.08] rounded-lg px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground/30 focus:outline-none focus:border-primary/30 transition-colors resize-none overflow-hidden"
             placeholder="Ask anything about emergency response…"
             value={input}
@@ -435,6 +496,7 @@ export function AssistantPage() {
           disabled={(!input.trim() && !imageFile) || typing}
           className="w-9 h-9 rounded-lg bg-primary text-primary-foreground text-sm font-bold hover:brightness-110 active:scale-95 transition-all flex items-center justify-center disabled:opacity-40 disabled:pointer-events-none flex-shrink-0"
           title="Send"
+          id="chat-send-btn"
         >
           →
         </button>

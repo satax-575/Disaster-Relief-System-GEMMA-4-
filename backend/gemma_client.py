@@ -273,15 +273,62 @@ class GemmaClient:
                 result = await self._cascade_chat(message, history, language)
         except Exception as e:
             logger.error(f"[GemmaClient] Primary provider error ({provider}): {e}")
-            try:
-                result = await self._cascade_chat(message, history, language)
-                result["fallback_reason"] = str(e)[:120]
-            except Exception as e2:
-                logger.error(f"[GemmaClient] Cascade also failed: {e2}")
-                result = self._static_fallback()
+            # Cascade 1: Try Groq text (fast, reliable) before Pollinations
+            groq_result = await self._groq_text_fallback(message, history, system_override)
+            if groq_result:
+                result = groq_result
+                result["fallback_reason"] = f"Gemma cloud unavailable: {str(e)[:80]}"
+            else:
+                try:
+                    result = await self._cascade_chat(message, history, language)
+                    result["fallback_reason"] = str(e)[:120]
+                except Exception as e2:
+                    logger.error(f"[GemmaClient] Cascade also failed: {e2}")
+                    result = self._static_fallback()
 
         result["processing_time_ms"] = int((time.monotonic() - t0) * 1000)
         return result
+
+    async def _groq_text_fallback(
+        self,
+        message: str,
+        history: Optional[List[Dict]] = None,
+        system_override: Optional[str] = None,
+    ) -> Optional[Dict]:
+        """Fast Groq text fallback (no vision) when Gemma cloud is down."""
+        if not config.groq_api_key:
+            return None
+        try:
+            sys_prompt = system_override or RAKSHA_SYSTEM_PROMPT
+            msgs = [{"role": "system", "content": sys_prompt}]
+            for h in (history or [])[-6:]:
+                msgs.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+            msgs.append({"role": "user", "content": message})
+            body = {
+                "model": "llama-3.3-70b-versatile",  # Groq's text model (fast, free tier)
+                "messages": msgs,
+                "temperature": 0.4,
+                "max_tokens": 2048,
+            }
+            headers = {
+                "Authorization": f"Bearer {config.groq_api_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=30) as client:
+                r = await client.post(config.groq_endpoint, headers=headers, json=body)
+                if r.status_code == 200:
+                    text = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if text:
+                        logger.info("[GemmaClient] Groq text fallback succeeded")
+                        return {
+                            "message": text.strip(),
+                            "model_used": "groq-llama-3.3-70b (fallback)",
+                            "function_calls": [],
+                            "function_results": [],
+                        }
+        except Exception as e:
+            logger.warning(f"[GemmaClient] Groq text fallback failed: {e}")
+        return None
 
     async def assess_damage(
         self,
@@ -488,9 +535,11 @@ class GemmaClient:
                     r.raise_for_status()
                     return self._parse_cloud_response(r.json())
             except httpx.HTTPStatusError as e:
-                if e.response.status_code in (429, 503):
+                # FIX: Gemma 4 returns 500 for model overload / large payloads — treat like 503
+                if e.response.status_code in (429, 500, 503):
                     wait = 2 ** attempt
-                    logger.warning(f"Cloud rate-limited (attempt {attempt+1}), retrying in {wait}s")
+                    status = e.response.status_code
+                    logger.warning(f"Cloud error {status} (attempt {attempt+1}/{config.gemma_cloud_retries}), retrying in {wait}s")
                     await asyncio.sleep(wait)
                     last_err = e
                 else:

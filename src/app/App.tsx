@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { Suspense, lazy, memo } from "react";
-import { AuthProvider }   from "../contexts/AuthContext";
+import { AuthProvider }    from "../contexts/AuthContext";
+import { LocationProvider } from "../contexts/LocationContext";
 import { LandingPage }    from "./pages/LandingPage";
 import { AuthPage }       from "./pages/AuthPage";
 import { ProtectedRoute } from "./components/app/ProtectedRoute";
@@ -46,33 +47,35 @@ function Page({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          {/* ── PUBLIC ──────────────────────────────────────────────── */}
-          <Route path="/"     element={<LandingPage />} />
-          <Route path="/auth" element={<AuthPage />} />
+      <LocationProvider>
+        <AuthProvider>
+          <Routes>
+            {/* ── PUBLIC ──────────────────────────────────────────────── */}
+            <Route path="/"     element={<LandingPage />} />
+            <Route path="/auth" element={<AuthPage />} />
 
-          {/* ── PROTECTED — wrapped in AppLayout ────────────────────── */}
-          <Route element={<ProtectedRoute />}>
-            <Route element={<AppLayout />}>
-              <Route path="/app/dashboard"  element={<Page><Dashboard /></Page>} />
-              <Route path="/app/incidents"  element={<Page><IncidentsPage /></Page>} />
-              <Route path="/app/assess"     element={<Page><AssessPage /></Page>} />
-              <Route path="/app/triage"     element={<Page><TriagePage /></Page>} />
-              <Route path="/app/assistant"  element={<Page><AssistantPage /></Page>} />
-              <Route path="/app/responders" element={<Page><RespondersPage /></Page>} />
-              <Route path="/app/alerts"     element={<Page><AlertsPage /></Page>} />
-              <Route path="/app"            element={<Navigate to="/app/dashboard" replace />} />
+            {/* ── PROTECTED — wrapped in AppLayout ────────────────────── */}
+            <Route element={<ProtectedRoute />}>
+              <Route element={<AppLayout />}>
+                <Route path="/app/dashboard"  element={<Page><Dashboard /></Page>} />
+                <Route path="/app/incidents"  element={<Page><IncidentsPage /></Page>} />
+                <Route path="/app/assess"     element={<Page><AssessPage /></Page>} />
+                <Route path="/app/triage"     element={<Page><TriagePage /></Page>} />
+                <Route path="/app/assistant"  element={<Page><AssistantPage /></Page>} />
+                <Route path="/app/responders" element={<Page><RespondersPage /></Page>} />
+                <Route path="/app/alerts"     element={<Page><AlertsPage /></Page>} />
+                <Route path="/app"            element={<Navigate to="/app/dashboard" replace />} />
+              </Route>
             </Route>
-          </Route>
 
-          {/* ── Fallback ─────────────────────────────────────────────── */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* ── Fallback ─────────────────────────────────────────────── */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
 
-        {/* Sonner toast — bottom-right, matches dark theme */}
-        <Toaster position="bottom-right" richColors />
-      </AuthProvider>
+          {/* Sonner toast — bottom-right, matches dark theme */}
+          <Toaster position="bottom-right" richColors />
+        </AuthProvider>
+      </LocationProvider>
     </BrowserRouter>
   );
 }

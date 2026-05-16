@@ -8,7 +8,88 @@ import {
 } from "../components/shared/index";
 import { Modal } from "../components/shared/Modal";
 import type { Responder } from "../../lib/types";
+import { useLocation } from "../../contexts/LocationContext";
+import { getEmergencyNumbers, type EmergencyNumbers } from "../../lib/emergencyNumbers";
 
+// ── Emergency number card ─────────────────────────────────────────────────────
+function EmergencyCard({ label, number, icon }: { label: string; number: string; icon: string }) {
+  return (
+    <a
+      href={`tel:${number.replace(/[^0-9+]/g, "")}`}
+      className="flex items-center gap-3 p-3 rounded-lg border border-white/[0.08] bg-white/[0.03] hover:bg-white/[0.06] hover:border-primary/30 transition-all group"
+      title={`Call ${label}: ${number}`}
+    >
+      <span className="text-xl flex-shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-muted-foreground/50 text-[10px] uppercase tracking-widest">{label}</p>
+        <p className="text-foreground font-semibold text-sm tabular-nums group-hover:text-primary transition-colors">
+          {number}
+        </p>
+      </div>
+      <svg className="w-3.5 h-3.5 text-muted-foreground/30 group-hover:text-primary transition-colors flex-shrink-0" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M3.654 1.328a.678.678 0 0 0-1.015-.063L1.605 2.3c-.483.484-.661 1.169-.45 1.77a17.568 17.568 0 0 0 4.168 6.608 17.569 17.569 0 0 0 6.608 4.168c.601.211 1.286.033 1.77-.45l1.034-1.034a.678.678 0 0 0-.063-1.015l-2.307-1.794a.678.678 0 0 0-.58-.122l-2.19.547a1.745 1.745 0 0 1-1.657-.459L5.482 8.062a1.745 1.745 0 0 1-.46-1.657l.548-2.19a.678.678 0 0 0-.122-.58L3.654 1.328z" />
+      </svg>
+    </a>
+  );
+}
+
+// ── Public Emergency Services section ────────────────────────────────────────
+function PublicEmergencySection({ em, loading }: { em: EmergencyNumbers; loading: boolean }) {
+  if (loading) {
+    return (
+      <div className="mb-6 p-4 rounded-xl border border-white/[0.08] bg-white/[0.02] animate-pulse">
+        <div className="h-4 w-48 bg-white/[0.06] rounded mb-3" />
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-16 bg-white/[0.04] rounded-lg" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="mb-6 p-4 rounded-xl border border-white/[0.08]"
+      id="emergency-services-section"
+      style={{ background: "rgba(34, 197, 94, 0.03)", borderColor: "rgba(34, 197, 94, 0.12)" }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-lg">{em.flag}</span>
+        <p className="text-foreground/70 text-xs font-semibold uppercase tracking-widest">
+          {em.country} — Public Emergency Services
+        </p>
+        <span className="ml-auto text-[10px] text-muted-foreground/40 flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-primary inline-block" />
+          Active 24/7
+        </span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" id="emergency-numbers-grid">
+        <EmergencyCard label="Police" number={em.police} icon="🚔" />
+        <EmergencyCard label="Ambulance" number={em.ambulance} icon="🚑" />
+        <EmergencyCard label="Fire" number={em.fire} icon="🚒" />
+        {em.disaster && (
+          <EmergencyCard
+            label={em.disasterName ?? "Disaster Mgmt"}
+            number={em.disaster}
+            icon="🆘"
+          />
+        )}
+        {em.coastGuard && (
+          <EmergencyCard label="Coast Guard" number={em.coastGuard} icon="⚓" />
+        )}
+        {em.mountainRescue && (
+          <EmergencyCard label="Mountain Rescue" number={em.mountainRescue} icon="🏔️" />
+        )}
+      </div>
+      <p className="text-muted-foreground/30 text-[10px] mt-2">
+        Numbers are official government emergency lines for {em.country}. Tap any number to call.
+      </p>
+    </div>
+  );
+}
+
+// ── Add Responder Modal ───────────────────────────────────────────────────────
 function AddResponderModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [form, setForm] = useState({
     name: "", unit: "", role: "Medical" as Responder["role"],
@@ -82,10 +163,15 @@ function AddResponderModal({ open, onClose }: { open: boolean; onClose: () => vo
   );
 }
 
+// ── RespondersPage ────────────────────────────────────────────────────────────
 export function RespondersPage() {
   const { set }             = useTopbar();
   const { data, loading }   = useResponders();
   const [showModal, setShowModal] = useState(false);
+  const geo                 = useLocation();
+
+  // Derive emergency numbers from detected country (or India as default)
+  const em = getEmergencyNumbers(geo.countryCode ?? "IN");
 
   const available  = data.filter((r) => r.status === "available").length;
   const dispatched = data.filter((r) => r.status === "dispatched").length;
@@ -101,6 +187,9 @@ export function RespondersPage() {
 
   return (
     <div>
+      {/* Public Emergency Services — location-aware */}
+      <PublicEmergencySection em={em} loading={geo.loading} />
+
       {/* Status summary pills */}
       <div className="flex flex-wrap gap-4 mb-6">
         <span className="text-primary text-sm font-medium">{available} Available</span>
