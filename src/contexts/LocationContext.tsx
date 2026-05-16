@@ -3,7 +3,7 @@
 import {
   createContext, useContext, useState, useEffect, type ReactNode,
 } from "react";
-import { reverseGeocodeCountry } from "../../lib/emergencyNumbers";
+import { reverseGeocodeCountry } from "../lib/emergencyNumbers";
 
 interface LocationState {
   granted:     boolean;           // true = user allowed geolocation
