@@ -410,10 +410,6 @@ The application is deployed on Render at https://rakshak-frontend.onrender.com w
 
 For production deployment beyond free tier, upgrade to Render Standard plan for always-on instances, increased resources, and zero cold starts.
 
-## License
-
-Developed for Gemma 4 Hackathon. License terms to be determined.
-
 ## Acknowledgments
 
 Built with Gemma 4 31B from Google DeepMind. Vision capabilities powered by HuggingFace BLIP.
