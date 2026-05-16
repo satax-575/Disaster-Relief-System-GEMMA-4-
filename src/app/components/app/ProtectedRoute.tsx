@@ -35,6 +35,6 @@ export function ProtectedRoute() {
   const { user, loading } = useAuth();
 
   if (loading) return <LoadingScreen />;
-  if (!user)   return <Navigate to="/auth" replace />;
+  if (!user)   return <Navigate to="/" replace />;
   return <Outlet />;
 }
