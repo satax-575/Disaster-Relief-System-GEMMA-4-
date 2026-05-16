@@ -32,16 +32,27 @@ function extractThinkingAndContent(raw: string): { thinking: string; content: st
   return { thinking: "", content: raw.trim() };
 }
 
-// ── Fix 3b — Post-processing sanitizer: strip JSON leakage from responses ─────
+// ── Fix 3b — Post-processing sanitizer: strip all leaked reasoning from AI responses ─
 function sanitizeFieldAssistantResponse(text: string): string {
   return text
+    // Strip JSON artifacts
     .replace(/JSON Function Call[\s\S]*$/im, "")
     .replace(/```json[\s\S]*?```/gim, "")
     .replace(/```[\s\S]*?```/gim, "")
     .replace(/\{\s*"[^"]+"\s*:[\s\S]*?\}/gm, "")
+    // Strip <think>...</think> blocks (in case they leak through)
+    .replace(/<think>[\s\S]*?<\/think>\s*/gi, "")
+    // Strip asterisk-wrapped inline reasoning (*Wait*, *Let me think*, *Hmm*, etc.)
+    .replace(/\*[^\n]{1,100}\*\n?/g, "")
+    // Strip lines that are clearly internal meta-commentary
+    .replace(/^(let me|I need to|I should|I will|I'm going to|hmm|wait|okay|alright|so,)[^\n]*\n?/gim, "")
+    // Remove duplicate consecutive section headers (e.g. SITUATION ASSESSMENT repeated twice)
+    .replace(/(\bSITUATION[^\n]*\n)([\s\S]*?)\1/gi, "$1$2")
+    // Collapse 3+ newlines into 2
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
 
 // ── Fix 3c — ETA injection for dispatch-type queries ──────────────────────────
 function injectETAIfMissing(response: string, inputText: string): string {

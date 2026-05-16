@@ -681,6 +681,7 @@ async def get_triage_guidance(request: TriageGuidanceRequest):
     guidance = await gemma_client.generate_triage_guidance(
         symptoms=request.symptoms,
         age_estimate=request.age_estimate,
+        gender=request.gender,
         vitals=None,
         language=request.language,
     )
@@ -710,6 +711,7 @@ async def get_triage_guidance_stream(request: TriageGuidanceRequest):
             guidance = await gemma_client.generate_triage_guidance(
                 symptoms=request.symptoms,
                 age_estimate=request.age_estimate,
+                gender=request.gender,
                 vitals=None,
                 language=request.language,
             )

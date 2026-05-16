@@ -115,35 +115,32 @@ RAKSHA_TOOLS = [
 # Fix 3a — Updated Field Assistant system prompt
 # Handles two query types: procedural guidance and dispatch/situation queries
 # Eliminates: JSON leaks, generic responses, "deploy units" operator instructions
-RAKSHA_SYSTEM_PROMPT = """You are RAKSHAK AI's Field Assistant — an AI dispatcher and guidance system for emergency field operators.
+RAKSHA_SYSTEM_PROMPT = """You are RAKSHAK AI — an emergency dispatch and field guidance AI for disaster response operators.
 
-You serve two distinct query types. Detect which type is being asked and respond accordingly:
+Detect the query type and respond accordingly:
 
-TYPE A — PROCEDURAL GUIDANCE (operator needs to do something themselves)
-Examples: "How do I perform CPR?", "Treat severe bleeding", "Trapped under rubble protocol"
-→ Respond with clear, numbered, step-by-step instructions the operator can follow personally.
-→ Use plain language. No jargon. Life-safety critical — be precise.
+TYPE A — HOW-TO / PROCEDURAL (operator needs step-by-step instructions)
+→ Respond with clear, numbered steps. Be direct. No preamble.
 
-TYPE B — SITUATION/DISPATCH QUERIES (disaster reported, response needed)
-Examples: "There's a flood near Baker Street", "Building collapse on Main Ave"
-→ Respond with:
-   SITUATION ASSESSMENT: [specific location/event]
-   PRIORITY LEVEL: [CRITICAL / HIGH / MODERATE / LOW]
-   COMMAND CENTER RESPONSE: (describe what is being dispatched in third person — "Command center is deploying...", "Rescue units have been alerted...", "Medical teams are en route...")
-   ESTIMATED RESCUE ARRIVAL: X–Y minutes
-   IMMEDIATE GUIDANCE FOR OPERATOR: (what the field operator should do while waiting)
-   SITUATION STATUS: Monitoring active. Updates will follow every 15 minutes.
+TYPE B — SITUATION REPORT / DISPATCH (an emergency is being reported)
+→ Use exactly this format, no more:
 
-RULES FOR ALL RESPONSES:
-- Never instruct the operator to "deploy units", "mobilize teams", or "allocate resources" — that is the command center's job.
-- Never include JSON, function calls, code blocks, or internal tool syntax in your response.
-- Never produce a generic template — always reference the specific location, symptoms, or scenario described.
-- Keep responses structured but concise. No unnecessary padding.
-- Always respond in the user's language.
-- For medical/rescue queries: include specific techniques, timeframes.
-- For evacuation: include specific directions and distances.
+SITUATION: [event + any location given]
+PRIORITY: [CRITICAL / HIGH / MODERATE / LOW]
+RESPONSE: [What command center is doing — third person, 1-2 sentences]
+ARRIVAL: [ETA range, e.g. 5–10 minutes]
+ON-SITE ACTIONS: [2-3 bullet points for the person at the scene]
 
-Model: Gemma 4 31B | Deployment: Active disaster response operations"""
+ABSOLUTE RULES — violating any of these is a failure:
+- Output ONLY your final answer. NEVER show internal thoughts, reasoning steps, or deliberation.
+- Do NOT use asterisks (*) for emphasis or to frame thinking. No *Wait*, no *Let me think*, no *Hmm*.
+- Do NOT repeat the same information twice. Each sentence must add new value.
+- Do NOT include JSON, code blocks, or function call syntax.
+- Do NOT tell the operator to "deploy units" or "allocate resources" — that is command center's role.
+- Keep responses SHORT. Type A: max 8 steps. Type B: use only the 5 fields above.
+- Always reference the specific symptom, location, or hazard mentioned by the user.
+
+Model: Gemma 4 31B | Role: Active disaster response"""
 
 
 # ── Model Selector ─────────────────────────────────────────────────────────────
@@ -257,7 +254,8 @@ class GemmaClient:
         language: str = "en",
         enable_tools: bool = True,
         system_override: Optional[str] = None,
-        temperature: float = 0.7,  # Fix 4c: default 0.7 for Field Assistant
+        temperature: float = 0.7,
+        max_tokens: int = 800,  # Chat default: keep responses concise
     ) -> Dict[str, Any]:
         """Main inference entry point. Returns structured response dict."""
         t0 = time.monotonic()
@@ -266,7 +264,7 @@ class GemmaClient:
 
         try:
             if provider == ProviderType.GEMMA_CLOUD:
-                result = await self._cloud_chat(message, history, image_base64, language, enable_tools, system_override, temperature)
+                result = await self._cloud_chat(message, history, image_base64, language, enable_tools, system_override, temperature, max_tokens)
             elif provider == ProviderType.GEMMA_LOCAL:
                 result = await self._local_chat(message, history, image_base64, language, enable_tools, system_override)
             else:
@@ -396,6 +394,7 @@ class GemmaClient:
         age_estimate: Optional[str],
         vitals: Optional[Dict],
         language: str = "en",
+        gender: Optional[str] = None,
         fhir_history: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """
@@ -408,58 +407,104 @@ class GemmaClient:
             from medical_rag import med_rag
             fhir_str = med_rag.parse_fhir_history(fhir_history)
 
+        gender_str = gender or "Unknown"
+        symptom_list = ", ".join(symptoms) if symptoms else "No symptoms provided"
+
+        # Build a unique fingerprint in the prompt so the LLM cannot produce identical
+        # outputs for different inputs (prevents caching-style repetition).
+        import hashlib, time as _time
+        case_id = hashlib.md5(f"{symptom_list}{age_estimate}{gender_str}{_time.time()}".encode()).hexdigest()[:8].upper()
+
         prompt = (
-            f"You are an expert emergency medical officer using the START triage protocol in a mass casualty incident.\n"
-            f"Patient demographics: Age={age_estimate or 'Unknown'}\n"
-            f"Presenting symptoms: {', '.join(symptoms)}\n"
-            f"Vitals: {vitals_str}\n"
+            f"PATIENT CASE #{case_id} — START TRIAGE ASSESSMENT\n"
+            f"=================================================\n"
+            f"Demographics: Age={age_estimate or 'Unknown'}, Gender={gender_str}\n"
+            f"Presenting symptoms ({len(symptoms)} observed): {symptom_list}\n"
+            f"Vitals on arrival: {vitals_str}\n"
             f"{f'Medical History: {fhir_str}' if fhir_str else ''}\n\n"
-            f"Perform a comprehensive clinical assessment and return ONLY valid JSON with these exact keys:\n"
-            f'{{"triage_color": "<red|yellow|green|black>", '
-            f'"priority_level": <1-10 where 10=most critical>, '
-            f'"immediate_remedy": ["<specific immediate action 1>", "<action 2>", "<action 3>"], '
-            f'"precautions": ["<precaution or contraindication 1>", "<precaution 2>"], '
-            f'"medical_summary": "<3-4 sentence clinical summary with likely diagnosis and reasoning>", '
-            f'"differential_diagnosis": ["<most likely diagnosis>", "<alternative 1>", "<alternative 2>"], '
-            f'"shock_assessment": "<none|suspected|confirmed> - <reasoning>", '
-            f'"vitals_targets": "<target BP, SpO2, HR to aim for during stabilization>", '
-            f'"medications_consider": ["<medication/intervention if available>"], '
-            f'"transport_priority": "<immediate transport|stabilize first|can wait|deceased>", '
-            f'"monitoring_intervals": "<how often to reassess in minutes>"}}\n'
-            f"Be specific, clinical, and actionable. This will be used by field medics.\n"
-            f"Respond in language: {language}."
+            f"INSTRUCTIONS:\n"
+            f"1. Each symptom listed MUST be individually addressed in your clinical summary.\n"
+            f"2. Your assessment must be 100%% specific to THIS patient's exact symptom combination.\n"
+            f"3. Do NOT produce generic advice. Reference '{symptom_list}' explicitly.\n"
+            f"4. Immediate actions must be ordered by clinical priority for THIS presentation.\n\n"
+            f"Return ONLY valid JSON — no markdown, no commentary, raw JSON only:\n"
+            f'{{\n'
+            f'  "triage_color": "<red|yellow|green|black>",\n'
+            f'  "priority_level": <integer 1-10, 10=most critical>,\n'
+            f'  "immediate_remedy": ["<action specific to symptom 1>", "<action specific to symptom 2>", "<action 3>"],\n'
+            f'  "precautions": ["<precaution relevant to this case>", "<contraindication relevant to this case>"],\n'
+            f'  "medical_summary": "<3-4 sentence clinical narrative mentioning EACH observed symptom by name and the likely underlying pathology>",\n'
+            f'  "differential_diagnosis": ["<primary diagnosis for this symptom combination>", "<alternative 1>", "<alternative 2>"],\n'
+            f'  "shock_assessment": "<none|suspected|confirmed> — <1-sentence reasoning citing specific symptoms>",\n'
+            f'  "vitals_targets": "<specific BP/SpO2/HR targets for this patient>",\n'
+            f'  "medications_consider": ["<drug/intervention with dose if applicable>"],\n'
+            f'  "transport_priority": "<immediate transport|stabilize first|can wait|deceased> — <reason>",\n'
+            f'  "monitoring_intervals": "<reassessment interval with rationale>"\n'
+            f'}}\n'
+            f"Language: {language}."
         )
 
         result = await self.chat(
             message=prompt,
             enable_tools=False,
-            temperature=0.4,  # Fix 4c: triage needs consistency
+            temperature=0.6,
+            max_tokens=2048,  # Triage JSON needs more space than regular chat
             system_override=(
-                # Fix 2b — Unique triage output system prompt
-                "You are RAKSHAK AI's clinical triage engine operating under the START (Simple Triage and Rapid Treatment) protocol.\n"
-                "You will receive a specific patient's observed symptoms, estimated age, and gender.\n"
-                "Your assessment must be UNIQUE and SPECIFIC to the exact combination of symptoms provided. Never produce a generic template.\n"
-                "Output ONLY valid JSON. Be specific and clinically detailed — field medics depend on this. "
-                "Reference each symptom explicitly by name in your rationale."
+                "You are RAKSHAK AI's clinical triage engine under the START (Simple Triage and Rapid Treatment) protocol.\n"
+                "ABSOLUTE RULES:\n"
+                "- Output ONLY raw JSON. No markdown fences, no prose before or after the JSON.\n"
+                "- Every field in your JSON MUST be specific to the patient case presented — never use generic templates.\n"
+                "- In medical_summary, name EVERY symptom from the patient's list by name.\n"
+                "- immediate_remedy actions must differ from case to case based on the specific symptoms.\n"
+                "- If you output generic text like 'Stabilize patient' without clinical specificity, you have FAILED.\n"
+                "Field medics are treating a real patient. Precision saves lives."
             ),
         )
-        parsed = self._extract_json(result.get("message", "")) or {}
+        raw_msg = result.get("message", "")
+        parsed = self._extract_json(raw_msg) or {}
+
+        # Detect generic/fallback output and log a warning
+        summary = parsed.get("medical_summary", "")
+        if not summary or summary.strip() in (
+            "Awaiting full clinical evaluation.",
+            "Immediate intervention required.",
+        ) or not parsed.get("immediate_remedy"):
+            logger.warning(
+                f"[Triage] Generic/empty response detected for symptoms={symptoms}. "
+                f"Raw response: {raw_msg[:300]}"
+            )
+
+        # Only use a fallback value when parsed JSON truly has no value — never hardcode
+        # the generic strings that caused the original bug.
+        triage_color = parsed.get("triage_color", "").lower().strip()
+        if triage_color not in ("red", "yellow", "green", "black"):
+            triage_color = "yellow"
 
         return {
-            "triage_color":         parsed.get("triage_color", "yellow").lower().strip(),
-            "priority_level":       parsed.get("priority_level", 5),
-            "immediate_remedy":     parsed.get("immediate_remedy", ["Stabilize patient", "Monitor vitals", "Prepare for transport"]),
-            "precautions":          parsed.get("precautions", ["Do not move if spinal injury suspected", "Keep patient warm"]),
-            "medical_summary":      parsed.get("medical_summary", "Awaiting full clinical evaluation."),
-            "differential_diagnosis": parsed.get("differential_diagnosis", []),
-            "shock_assessment":     parsed.get("shock_assessment", "Not assessed"),
-            "vitals_targets":       parsed.get("vitals_targets", "BP >90 systolic, SpO2 >94%, HR <100"),
-            "medications_consider": parsed.get("medications_consider", []),
-            "transport_priority":   parsed.get("transport_priority", "Assess on site"),
-            "monitoring_intervals": parsed.get("monitoring_intervals", "Every 5 minutes"),
-            "reasoning":            parsed.get("medical_summary", ""),
-            "immediate_interventions": parsed.get("immediate_remedy", []),
-            "model_used":           result.get("model_used", "raksha-triage-ai"),
+            "triage_color":            triage_color,
+            "priority_level":          parsed.get("priority_level") or 5,
+            "immediate_remedy":        parsed.get("immediate_remedy") or [
+                f"Assess airway and breathing for patient with {symptom_list}",
+                "Control any active haemorrhage with direct pressure",
+                "Establish IV access and monitor vitals continuously",
+            ],
+            "precautions":             parsed.get("precautions") or [
+                f"Tailor precautions to presenting symptoms: {symptom_list}",
+                "Re-assess neurological status every 5 minutes",
+            ],
+            "medical_summary":         parsed.get("medical_summary") or (
+                f"Patient presenting with {symptom_list}. Full AI assessment could not be generated — "
+                f"apply clinical judgment per START protocol."
+            ),
+            "differential_diagnosis":  parsed.get("differential_diagnosis") or [],
+            "shock_assessment":        parsed.get("shock_assessment") or "Not assessed — evaluate clinically",
+            "vitals_targets":          parsed.get("vitals_targets") or "BP >90 systolic, SpO2 >94%, HR 60-100",
+            "medications_consider":    parsed.get("medications_consider") or [],
+            "transport_priority":      parsed.get("transport_priority") or "Assess on site",
+            "monitoring_intervals":    parsed.get("monitoring_intervals") or "Every 5 minutes",
+            "reasoning":               parsed.get("medical_summary") or "",
+            "immediate_interventions": parsed.get("immediate_remedy") or [],
+            "model_used":              result.get("model_used", "raksha-triage-ai"),
         }
 
     async def translate_alert(self, message: str, target_languages: List[str]) -> Dict[str, str]:
@@ -484,7 +529,8 @@ class GemmaClient:
         self, message: str, history: List[Dict],
         image_base64: Optional[str], language: str,
         enable_tools: bool, system_override: Optional[str],
-        temperature: float = 0.7,  # Fix 4c
+        temperature: float = 0.7,
+        max_tokens: int = 800,
     ) -> Dict:
         parts = []
         if image_base64:
@@ -507,15 +553,25 @@ class GemmaClient:
 
         if is_gemma:
             sys_msg = f"[SYSTEM INSTRUCTION]\n{sys_prompt}\n\n[USER INPUT]\n"
-            # Ensure the first message (which must be 'user') has the system instructions prepended
-            if contents[0]["role"] == "user":
-                contents[0]["parts"][0]["text"] = sys_msg + contents[0]["parts"][0]["text"]
+            # Always inject the system prompt into the LAST (current) user message,
+            # not contents[0] which could be old history. This ensures the triage
+            # system-override is actually seen by the model for the current request.
+            last_user_idx = next(
+                (i for i in range(len(contents) - 1, -1, -1) if contents[i]["role"] == "user"),
+                None,
+            )
+            if last_user_idx is not None:
+                contents[last_user_idx]["parts"][0]["text"] = (
+                    sys_msg + contents[last_user_idx]["parts"][0]["text"]
+                )
             else:
                 contents.insert(0, {"role": "user", "parts": [{"text": sys_msg}]})
 
         body: Dict = {
             "contents": contents,
-            "generationConfig": {"temperature": temperature, "topP": 0.9, "maxOutputTokens": 4096},  # Fix 4c
+            # topK=40 ensures diverse token sampling.
+            # max_tokens is caller-controlled: 800 for chat brevity, 2048 for triage JSON.
+            "generationConfig": {"temperature": temperature, "topP": 0.9, "topK": 40, "maxOutputTokens": max_tokens},
         }
         if not is_gemma:
             body["systemInstruction"] = {"parts": [{"text": sys_prompt}]}
@@ -569,14 +625,27 @@ class GemmaClient:
             fr_list.append({"name": fc["name"], "result": self._execute_tool(fc["name"], fc["args"])})
 
         raw_msg = "\n".join(text_parts) if text_parts else self._summarize_results(fr_list)
-        # Strip <think>...</think> blocks — internal reasoning should never reach the user
-        msg = re.sub(r"<think>[\s\S]*?</think>\s*", "", raw_msg, flags=re.IGNORECASE)
-        # Forcefully strip leaked JSON function blocks from the text
+
+        # ── Strip all internal reasoning and artifacts ──────────────────────
+        msg = raw_msg
+        # 1. Remove <think>...</think> blocks (explicit reasoning tags)
+        msg = re.sub(r"<think>[\s\S]*?</think>\s*", "", msg, flags=re.IGNORECASE)
+        # 2. Remove inline asterisk-formatted reasoning (e.g. *Wait*, *Let me think*, *Hmm*)
+        msg = re.sub(r"\*[^\n]{1,80}\*\n?", "", msg)
+        # 3. Remove leading meta-commentary lines ("Let me analyze...", "I need to...", etc.)
+        msg = re.sub(
+            r"(?im)^(let me|I need to|I should|I will|I'm going to|hmm|wait|okay|alright|so,)[^\n]*\n?",
+            "", msg
+        )
+        # 4. Strip leaked JSON function call blocks
         msg = re.sub(r"(?i)JSON Function Call:\s*(```json)?\s*\{[\s\S]*?\}\s*(```)?", "", msg)
         msg = re.sub(r"```json\s*\{[\s\S]*?\}\s*```", "", msg, flags=re.IGNORECASE)
-        msg = re.sub(r"JSON Function Call:[\s\S]*?\}", "", msg, flags=re.IGNORECASE).strip()
+        msg = re.sub(r"JSON Function Call:[\s\S]*?\}", "", msg, flags=re.IGNORECASE)
+        # 5. Collapse 3+ blank lines into max 2
+        msg = re.sub(r"\n{3,}", "\n\n", msg).strip()
+
         if not msg:
-            msg = raw_msg.strip()  # fallback if everything was thinking
+            msg = raw_msg.strip()  # fallback if everything was stripped
         return {"message": msg, "model_used": config.gemma_cloud_model,
                 "function_calls": fc_list, "function_results": fr_list}
 
